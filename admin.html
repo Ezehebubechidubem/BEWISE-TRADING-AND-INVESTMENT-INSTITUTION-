@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Admin — Crypto Training</title>
+<style>
+ body{font-family:Arial;background:#f6f7fb;margin:0;padding:20px}
+ .wrap{max-width:900px;margin:auto}
+ .panel{background:#fff;border-radius:10px;padding:14px;box-shadow:0 8px 20px rgba(0,0,0,.05);margin-bottom:12px}
+ input,select{padding:8px;border-radius:6px;border:1px solid #eee;width:100%}
+ .row{display:flex;gap:10px}
+ .col{flex:1}
+ .btn{background:#00c853;color:#fff;padding:8px 10px;border-radius:8px;border:0;cursor:pointer}
+ .danger{background:#e53935}
+ .list{margin-top:12px}
+ .item{padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h2>Admin — Login</h2>
+      <div style="max-width:420px">
+        <input id="adminPass" type="password" placeholder="Admin passphrase" />
+        <div style="height:8px"></div>
+        <button id="adminLogin" class="btn">Login</button>
+      </div>
+    </div>
+
+    <div id="adminArea" style="display:none">
+      <div class="panel">
+        <h3>Generate PIN</h3>
+        <input id="pinName" placeholder="Student name / email" />
+        <div style="height:8px"></div>
+        <button id="genPin" class="btn">Generate 6-digit PIN</button>
+        <div id="pinResult" style="margin-top:10px;color:#333"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Active PINs (revoke)</h3>
+        <div id="pinList" class="list"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Upload Video</h3>
+        <input id="videoTitle" placeholder="Video title" />
+        <div style="height:8px"></div>
+        <input id="videoFile" type="file" accept="video/*" />
+        <div style="height:8px"></div>
+        <button id="uploadVideo" class="btn">Upload</button>
+        <div id="uploadResult" style="margin-top:8px"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Uploaded Videos</h3>
+        <div id="videoList" class="list"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const API_BASE = "https://payme-update.onrender.com";
+let adminToken = null;
+
+document.getElementById('adminLogin').addEventListener('click', async ()=>{
+  const pass = document.getElementById('adminPass').value.trim();
+  if (!pass) return alert('Enter passphrase');
+  // POST to /admin/login -> returns {status:'success', token}
+  try {
+    const r = await fetch(API_BASE + '/admin/login', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pass})
+    });
+    const j = await r.json();
+    if (r.ok && j.status === 'success') {
+      adminToken = j.token;
+      document.getElementById('adminArea').style.display = 'block';
+      loadPins(); loadVideos();
+      document.getElementById('adminPass').value = '';
+    } else {
+      alert(j.message || 'Login failed');
+    }
+  } catch (e) { console.error(e); alert('Network error'); }
+});
+
+document.getElementById('genPin').addEventListener('click', async ()=>{
+  const name = document.getElementById('pinName').value.trim();
+  if (!name) return alert('Enter name or email');
+  try {
+    const r = await fetch(API_BASE + '/admin/create_pin', {
+      method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token': adminToken},
+      body: JSON.stringify({name})
+    });
+    const j = await r.json();
+    if (r.ok && j.status === 'success') {
+      document.getElementById('pinResult').textContent = 'PIN: ' + j.pin + ' (copy it for user)';
+      document.getElementById('pinName').value = '';
+      loadPins();
+    } else {
+      alert(j.message || 'Could not create pin');
+    }
+  } catch(e){ console.error(e); alert('Network error'); }
+});
+
+async function loadPins(){
+  try {
+    const r = await fetch(API_BASE + '/admin/list_pins', {headers: {'X-Admin-Token': adminToken}});
+    const j = await r.json();
+    const list = document.getElementById('pinList'); list.innerHTML = '';
+    if (r.ok && j.pins) {
+      j.pins.forEach(p => {
+        const div = document.createElement('div'); div.className = 'item';
+        div.innerHTML = `<div><strong>${p.pin}</strong> — ${p.name || ''} <div style="color:#666;font-size:12px">status: ${p.revoked ? 'revoked' : (p.device_id? 'bound' : 'new')}</div></div>
+                         <div><button data-pin="${p.pin}" class="btn revoke">${p.revoked? 'Revoked':'Revoke'}</button></div>`;
+        list.appendChild(div);
+      });
+      document.querySelectorAll('.revoke').forEach(b=>b.addEventListener('click', revokePin));
+    } else {
+      list.textContent = 'No pins';
+    }
+  } catch(e){ console.error(e); }
+}
+
+async function revokePin(e){
+  const pin = e.currentTarget.getAttribute('data-pin');
+  if (!confirm('Revoke PIN ' + pin + '?')) return;
+  try {
+    const r = await fetch(API_BASE + '/admin/revoke_pin', {
+      method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token': adminToken}, body: JSON.stringify({pin})
+    });
+    const j = await r.json();
+    if (r.ok && j.status==='success') { loadPins(); } else alert(j.message || 'Failed');
+  } catch(e){ console.error(e); }
+}
+
+/* video upload */
+document.getElementById('uploadVideo').addEventListener('click', async ()=>{
+  const f = document.getElementById('videoFile').files[0];
+  const title = document.getElementById('videoTitle').value.trim();
+  if (!f || !title) return alert('Choose file and title');
+  const fd = new FormData(); fd.append('file', f); fd.append('title', title);
+  try {
+    const r = await fetch(API_BASE + '/admin/upload_video', {method:'POST', headers: {'X-Admin-Token': adminToken}, body: fd});
+    const j = await r.json();
+    if (r.ok && j.status==='success') {
+      document.getElementById('uploadResult').textContent = 'Uploaded';
+      document.getElementById('videoFile').value = ''; document.getElementById('videoTitle').value = '';
+      loadVideos();
+    } else {
+      alert(j.message || 'Upload failed');
+    }
+  } catch(e){ console.error(e); alert('Network error'); }
+});
+
+async function loadVideos(){
+  try {
+    const r = await fetch(API_BASE + '/videos', {headers: {'X-Admin-Token': adminToken}});
+    const j = await r.json();
+    const list = document.getElementById('videoList'); list.innerHTML = '';
+    if (r.ok && Array.isArray(j)) {
+      j.forEach(v=>{
+        const div = document.createElement('div'); div.className='item';
+        div.innerHTML = `<div><strong>${v.title}</strong> <div style="color:#666;font-size:12px">${v.filename}</div></div>
+                         <div><a href="${v.url}" target="_blank">Open</a></div>`;
+        list.appendChild(div);
+      });
+    } else list.textContent = 'No videos';
+  } catch(e){ console.error(e); }
+}
+</script>
+</body>
+</html>
