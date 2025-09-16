@@ -1,106 +1,116 @@
-
 # app.py
 import os
-import sqlite3
 import secrets
 from datetime import datetime, timedelta
 from flask import (
-    Flask, request, jsonify, send_from_directory,
-    g, render_template, redirect, url_for, make_response
+    Flask, request, jsonify, send_from_directory, render_template, make_response, abort
 )
+from flask_sqlalchemy import SQLAlchemy
 
+# ---------- Config ----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
-STATIC_FOLDER = os.path.join(BASE_DIR, "static")
-DB_PATH = os.path.join(BASE_DIR, "data.db")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(STATIC_FOLDER, exist_ok=True)
 
-app = Flask(__name__, static_folder=STATIC_FOLDER, template_folder=os.path.join(BASE_DIR, "templates"))
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.secret_key = secrets.token_urlsafe(32)
+DATABASE_URL = os.environ.get("DATABASE_URL")  # e.g. postgres://user:pass@host:5432/dbname
+if not DATABASE_URL:
+    # fallback to sqlite for local dev if DATABASE_URL not provided
+    DATABASE_URL = "sqlite:///" + os.path.join(BASE_DIR, "data.db")
 
-# In-memory session tokens (for demo). In production persist or use flask-login.
-sessions = {}  # token -> {pin_id, device_id, expires_at}
+ADMIN_PIN = os.environ.get("ADMIN_PIN", "891959")           # admin-pin (your requirement)
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", ADMIN_PIN)  # admin API auth header value (default = ADMIN_PIN)
+SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_urlsafe(24))
+# optional: set ALLOWED_DEVICE_HASH to restrict ALL logins to a single device fingerprint (server-side device lock)
+ALLOWED_DEVICE_HASH = os.environ.get("ALLOWED_DEVICE_HASH")  # set this to your device fingerprint to lock site to your device
 
-# ---------- DB helpers ----------
-def get_db():
-    db = getattr(g, "_database", None)
-    if db is None:
-        db = g._database = sqlite3.connect(DB_PATH, check_same_thread=False)
-        db.row_factory = sqlite3.Row
-    return db
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.secret_key = SECRET_KEY
 
-def init_db():
-    db = get_db()
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS pins (
-        id INTEGER PRIMARY KEY,
-        pin TEXT UNIQUE,
-        note TEXT,
-        device_id TEXT,
-        ip TEXT,
-        revoked INTEGER DEFAULT 0,
-        created_at TEXT,
-        assigned_at TEXT
-    )""")
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS videos (
-        id INTEGER PRIMARY KEY,
-        title TEXT,
-        filename TEXT,
-        uploaded_at TEXT
-    )""")
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS payments (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        email TEXT,
-        course_title TEXT,
-        proof_filename TEXT,
-        created_at TEXT
-    )""")
-    db.commit()
+db = SQLAlchemy(app)
 
-@app.teardown_appcontext
-def close_connection(exception):
-    db = getattr(g, "_database", None)
-    if db is not None:
-        db.close()
+# ---------- Models ----------
+class Pin(db.Model):
+    __tablename__ = "pins"
+    id = db.Column(db.Integer, primary_key=True)
+    pin = db.Column(db.String(6), unique=True, nullable=False)
+    note = db.Column(db.String(200))
+    device_id = db.Column(db.String(512))  # fingerprint assigned to
+    ip = db.Column(db.String(64))
+    revoked = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    assigned_at = db.Column(db.DateTime)
 
-# ---------- Utilities ----------
+class Video(db.Model):
+    __tablename__ = "videos"
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(300))
+    filename = db.Column(db.String(1000))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Payment(db.Model):
+    __tablename__ = "payments"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200))
+    email = db.Column(db.String(200))
+    course_title = db.Column(db.String(300))
+    proof_filename = db.Column(db.String(1000))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Session(db.Model):
+    __tablename__ = "sessions"
+    token = db.Column(db.String(128), primary_key=True)
+    pin_id = db.Column(db.Integer, db.ForeignKey("pins.id"))
+    device_id = db.Column(db.String(512))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime)
+
+# ---------- Helpers ----------
+def now():
+    return datetime.utcnow()
+
 def generate_pin():
     return "{:06d}".format(secrets.randbelow(900000) + 100000)
 
-def now_iso():
-    return datetime.utcnow().isoformat()
-
-def make_session(pin_id, device_id):
-    token = secrets.token_urlsafe(32)
-    sessions[token] = {
-        "pin_id": pin_id,
-        "device_id": device_id,
-        "created_at": datetime.utcnow(),
-        "expires_at": datetime.utcnow() + timedelta(hours=24)
-    }
+def create_session(pin_id, device_id, hours=24):
+    token = secrets.token_urlsafe(40)
+    s = Session(token=token, pin_id=pin_id, device_id=device_id,
+                created_at=now(), expires_at=now() + timedelta(hours=hours))
+    db.session.add(s); db.session.commit()
     return token
 
-def validate_session_token(token):
-    s = sessions.get(token)
-    if not s:
+def validate_session(token):
+    if not token: return None
+    s = Session.query.filter_by(token=token).first()
+    if not s: return None
+    if s.expires_at < now():
+        try:
+            db.session.delete(s); db.session.commit()
+        except: pass
         return None
-    if s["expires_at"] < datetime.utcnow():
-        sessions.pop(token, None)
-        return None
-    # also check that pin still exists and is not revoked
-    db = get_db()
-    row = db.execute("SELECT * FROM pins WHERE id=?", (s["pin_id"],)).fetchone()
-    if not row or row["revoked"] == 1:
-        sessions.pop(token, None)
+    # check pin not revoked
+    p = Pin.query.get(s.pin_id)
+    if not p or p.revoked:
+        try:
+            db.session.delete(s); db.session.commit()
+        except: pass
         return None
     return s
+
+def admin_auth_ok(req):
+    header = req.headers.get("X-ADMIN-PW") or req.form.get("admin_pw")
+    return header and header == ADMIN_PASSWORD
+
+# ---------- Init DB & ensure admin pin exists ----------
+with app.app_context():
+    db.create_all()
+    # ensure admin pin exists in the pins table (so admin login flows like a normal pin)
+    admin_pin_obj = Pin.query.filter_by(pin=ADMIN_PIN).first()
+    if not admin_pin_obj:
+        p = Pin(pin=ADMIN_PIN, note="admin-pin", created_at=now(), revoked=False)
+        db.session.add(p); db.session.commit()
 
 # ---------- Routes (pages) ----------
 @app.route("/")
@@ -117,25 +127,27 @@ def course_page():
 
 @app.route("/payment")
 def payment_page():
+    # keep payment.html untouched if you already have it in templates
     return render_template("payment.html")
 
 @app.route("/admin")
 def admin_page():
     return render_template("admin.html")
 
-# ---------- API ----------
+# ---------- API endpoints ----------
 @app.route("/api/login", methods=["POST"])
 def api_login():
     """
-    JSON: { pin: "123456", device_id: "device-uuid" }
-    Behavior:
-      - If pin not found or revoked => error.
-      - If pin found and device_id is NULL => assign to device and issue session.
-      - If pin found and device_id == provided => issue session.
-      - If pin found and device_id != provided => automatically revoke the PIN and deny login.
+    JSON body: { pin: "123456", device_id: "<fingerprint>" }
+    Device-binding + single-device policy implemented:
+      - If ALLOWED_DEVICE_HASH is set and device_id != allowed => deny
+      - If PIN not found => 404
+      - If pin.revoked => 403
+      - If pin.device_id is null: assign to this device and issue session
+      - If pin.device_id == device_id: issue session
+      - If pin.device_id != device_id: auto-revoke pin and deny
     """
-    db = get_db()
-    data = request.json or {}
+    data = request.get_json() or {}
     pin = (data.get("pin") or "").strip()
     device_id = (data.get("device_id") or "").strip()
     ip = request.remote_addr
@@ -143,152 +155,152 @@ def api_login():
     if not pin or len(pin) != 6:
         return jsonify({"success": False, "error": "invalid_pin_format"}), 400
 
-    row = db.execute("SELECT * FROM pins WHERE pin=?", (pin,)).fetchone()
-    if not row:
+    # server-side device lock (optional)
+    if ALLOWED_DEVICE_HASH and device_id and device_id != ALLOWED_DEVICE_HASH:
+        return jsonify({"success": False, "error": "device_not_allowed", "message": "This installation is locked to a specific device."}), 403
+
+    p = Pin.query.filter_by(pin=pin).first()
+    if not p:
         return jsonify({"success": False, "error": "pin_not_found"}), 404
 
-    if row["revoked"] == 1:
+    if p.revoked:
         return jsonify({"success": False, "error": "pin_revoked"}), 403
 
-    # Unassigned -> assign to device
-    if not row["device_id"]:
-        db.execute("UPDATE pins SET device_id=?, ip=?, assigned_at=? WHERE id=?",
-                   (device_id, ip, now_iso(), row["id"]))
-        db.commit()
-        token = make_session(row["id"], device_id)
+    # if unassigned -> assign to this device
+    if not p.device_id:
+        p.device_id = device_id
+        p.ip = ip
+        p.assigned_at = now()
+        db.session.add(p); db.session.commit()
+        token = create_session(p.id, device_id)
         resp = jsonify({"success": True, "message": "logged_in"})
         resp.set_cookie("session_token", token, httponly=True, samesite="Lax")
         return resp
 
-    # assigned and matches
-    if row["device_id"] == device_id:
-        token = make_session(row["id"], device_id)
+    # assigned and matching => session
+    if p.device_id == device_id:
+        token = create_session(p.id, device_id)
         resp = jsonify({"success": True, "message": "logged_in"})
         resp.set_cookie("session_token", token, httponly=True, samesite="Lax")
         return resp
 
-    # assigned but different device -> automatically revoke and deny
-    db.execute("UPDATE pins SET revoked=1 WHERE id=?", (row["id"],))
-    db.commit()
+    # assigned to different device -> revoke automatically and deny
+    p.revoked = True
+    db.session.add(p); db.session.commit()
     return jsonify({"success": False, "error": "revoked_due_to_multiple_devices", "message": "PIN revoked because it was used on another device."}), 403
 
 @app.route("/api/check_session")
 def api_check_session():
     token = request.cookies.get("session_token")
-    s = validate_session_token(token)
+    s = validate_session(token)
     if not s:
         return jsonify({"logged_in": False})
-    return jsonify({"logged_in": True, "pin_id": s["pin_id"], "device_id": s["device_id"]})
+    return jsonify({"logged_in": True, "pin_id": s.pin_id, "device_id": s.device_id})
 
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
     token = request.cookies.get("session_token")
-    if token and token in sessions:
-        sessions.pop(token, None)
+    if token:
+        s = Session.query.filter_by(token=token).first()
+        if s:
+            db.session.delete(s); db.session.commit()
     resp = jsonify({"success": True})
     resp.delete_cookie("session_token")
     return resp
 
-# Get all videos metadata
+# list videos metadata
 @app.route("/api/videos")
 def api_videos():
-    db = get_db()
-    rows = db.execute("SELECT id, title, filename, uploaded_at FROM videos ORDER BY uploaded_at DESC").fetchall()
-    videos = [dict(r) for r in rows]
-    return jsonify(videos)
+    rows = Video.query.order_by(Video.uploaded_at.desc()).all()
+    data = [{"id":r.id, "title":r.title, "uploaded_at": r.uploaded_at.isoformat()} for r in rows]
+    return jsonify(data)
 
-# Serve video only if session is valid and pin not revoked.
+# stream protected video
 @app.route("/stream/<int:video_id>")
 def stream_video(video_id):
     token = request.cookies.get("session_token")
-    s = validate_session_token(token)
+    s = validate_session(token)
     if not s:
         return "Unauthorized", 401
-
-    db = get_db()
-    row = db.execute("SELECT * FROM videos WHERE id=?", (video_id,)).fetchone()
-    if not row:
+    v = Video.query.get(video_id)
+    if not v:
         return "Not found", 404
-
-    filename = row["filename"]
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    if not os.path.exists(file_path):
+    path = os.path.join(app.config["UPLOAD_FOLDER"], v.filename)
+    if not os.path.exists(path):
         return "File missing", 404
-
-    # Serve with headers that dissuade direct download and caching
-    resp = make_response(send_from_directory(app.config['UPLOAD_FOLDER'], filename))
-    resp.headers["Content-Disposition"] = f'inline; filename="{filename}"'
+    resp = make_response(send_from_directory(app.config["UPLOAD_FOLDER"], v.filename))
+    resp.headers["Content-Disposition"] = f'inline; filename="{v.filename}"'
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
 
-# Admin: upload video
+# admin: upload video
 @app.route("/api/admin/upload_video", methods=["POST"])
 def api_admin_upload_video():
-    # simple admin auth via header or cookie
-    pw = request.headers.get("X-ADMIN-PW") or request.form.get("admin_pw")
-    if pw != ADMIN_PASSWORD:
+    if not admin_auth_ok(request):
         return jsonify({"success": False, "error": "admin_auth_required"}), 403
-
     title = request.form.get("title", "").strip()
     f = request.files.get("video")
     if not f or not title:
         return jsonify({"success": False, "error": "missing_title_or_file"}), 400
-
-    # safe filename
     safe_name = secrets.token_hex(8) + "_" + f.filename.replace(" ", "_")
-    path = os.path.join(app.config['UPLOAD_FOLDER'], safe_name)
+    path = os.path.join(app.config["UPLOAD_FOLDER"], safe_name)
     f.save(path)
-
-    db = get_db()
-    db.execute("INSERT INTO videos (title, filename, uploaded_at) VALUES (?, ?, ?)",
-               (title, safe_name, now_iso()))
-    db.commit()
+    v = Video(title=title, filename=safe_name, uploaded_at=now())
+    db.session.add(v); db.session.commit()
     return jsonify({"success": True})
 
-# Admin: generate pin
+# admin: generate pin
 @app.route("/api/admin/generate_pin", methods=["POST"])
 def api_admin_generate_pin():
-    pw = request.headers.get("X-ADMIN-PW")
-    if pw != ADMIN_PASSWORD:
+    if not admin_auth_ok(request):
         return jsonify({"success": False, "error": "admin_auth_required"}), 403
-
     note = (request.json or {}).get("note", "")[:200]
-    pin = generate_pin()
-    db = get_db()
-    try:
-        db.execute("INSERT INTO pins (pin, note, created_at) VALUES (?, ?, ?)", (pin, note, now_iso()))
-        db.commit()
-    except Exception as e:
-        return jsonify({"success": False, "error": "db_error", "detail": str(e)}), 500
-
+    # try unique pin
+    tries = 0
+    pin = None
+    while tries < 5:
+        tries += 1
+        candidate = generate_pin()
+        if not Pin.query.filter_by(pin=candidate).first():
+            pin = candidate; break
+    if not pin:
+        return jsonify({"success": False, "error": "could_not_create_pin"}), 500
+    p = Pin(pin=pin, note=note, created_at=now())
+    db.session.add(p); db.session.commit()
     return jsonify({"success": True, "pin": pin})
 
-# Admin: list pins
+# admin: list pins
 @app.route("/api/admin/pins")
 def api_admin_pins():
-    pw = request.headers.get("X-ADMIN-PW")
-    if pw != ADMIN_PASSWORD:
+    if not admin_auth_ok(request):
         return jsonify({"success": False, "error": "admin_auth_required"}), 403
-    db = get_db()
-    rows = db.execute("SELECT id, pin, note, device_id, ip, revoked, created_at, assigned_at FROM pins ORDER BY created_at DESC").fetchall()
-    return jsonify([dict(r) for r in rows])
+    rows = Pin.query.order_by(Pin.created_at.desc()).all()
+    data = []
+    for r in rows:
+        data.append({
+            "id": r.id, "pin": r.pin, "note": r.note, "device_id": r.device_id,
+            "ip": r.ip, "revoked": r.revoked, "created_at": (r.created_at.isoformat() if r.created_at else None),
+            "assigned_at": (r.assigned_at.isoformat() if r.assigned_at else None)
+        })
+    return jsonify(data)
 
-# Admin: revoke pin by id
+# admin: revoke pin
 @app.route("/api/admin/revoke_pin", methods=["POST"])
 def api_admin_revoke_pin():
-    pw = request.headers.get("X-ADMIN-PW")
-    if pw != ADMIN_PASSWORD:
+    if not admin_auth_ok(request):
         return jsonify({"success": False, "error": "admin_auth_required"}), 403
-    data = request.json or {}
+    data = request.get_json() or {}
     pin_id = data.get("pin_id")
     if not pin_id:
         return jsonify({"success": False, "error": "missing_pin_id"}), 400
-    db = get_db()
-    db.execute("UPDATE pins SET revoked=1 WHERE id=?", (pin_id,))
-    db.commit()
+    p = Pin.query.get(pin_id)
+    if not p:
+        return jsonify({"success": False, "error": "pin_not_found"}), 404
+    p.revoked = True
+    db.session.add(p); db.session.commit()
     return jsonify({"success": True})
 
-# Payment proof upload (from payment page)
+# payment proof upload
 @app.route("/api/payment/proof", methods=["POST"])
 def api_payment_proof():
     name = request.form.get("name", "")
@@ -298,28 +310,21 @@ def api_payment_proof():
     if not name or not f:
         return jsonify({"success": False, "error": "missing_fields"}), 400
     safe_name = secrets.token_hex(8) + "_" + f.filename.replace(" ", "_")
-    path = os.path.join(STATIC_FOLDER, safe_name)
+    path = os.path.join(app.static_folder, safe_name)
     f.save(path)
-    db = get_db()
-    db.execute("INSERT INTO payments (name, email, course_title, proof_filename, created_at) VALUES (?, ?, ?, ?, ?)",
-               (name, email, course_title, safe_name, now_iso()))
-    db.commit()
+    pay = Payment(name=name, email=email, course_title=course_title, proof_filename=safe_name, created_at=now())
+    db.session.add(pay); db.session.commit()
     return jsonify({"success": True})
 
-# serve logo
+# serve logo (static/logo.png) fallback
 @app.route("/logo.png")
 def logo():
-    path = os.path.join(STATIC_FOLDER, "logo.png")
-    if os.path.exists(path):
-        return send_from_directory(STATIC_FOLDER, "logo.png")
-    # return a small placeholder SVG if logo not provided
+    p = os.path.join(app.static_folder, "logo.png")
+    if os.path.exists(p):
+        return send_from_directory(app.static_folder, "logo.png")
     svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><rect width='100%' height='100%' fill='#444'/>"
            "<text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#fff' font-size='18'>LOGO</text></svg>")
-    resp = make_response(svg)
-    resp.headers['Content-Type'] = 'image/svg+xml'
-    return resp
+    return make_response(svg, 200, {"Content-Type": "image/svg+xml"})
 
 if __name__ == "__main__":
-    with app.app_context():
-        init_db()
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
