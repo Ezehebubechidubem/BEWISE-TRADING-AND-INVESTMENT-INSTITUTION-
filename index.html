@@ -1,165 +1,82 @@
+<!-- templates/authentication.html -->
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Login — Crypto Training</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Authentication — Crypto Training</title>
+<link rel="icon" href="/logo.png">
 <style>
-  :root{--brand:#00c853;--bg:#f7f8fb;--card:#fff;--muted:#666;}
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:system-ui,Segoe UI,Roboto,Arial; background:var(--bg); color:#111;}
-  .wrap{max-width:420px;margin:40px auto;padding:18px}
-  .card{background:var(--card);border-radius:12px;padding:18px;box-shadow:0 6px 20px rgba(0,0,0,.06)}
-  .logo{display:flex;gap:12px;align-items:center}
-  .logo img{width:52px;height:52px;border-radius:8px}
-  h1{font-size:20px;margin-bottom:6px}
-  p.sub{color:var(--muted);margin-bottom:14px}
-  .pin-row{display:flex;gap:8px;margin-bottom:12px}
-  input[type="tel"]{flex:1;padding:12px;border-radius:8px;border:1px solid #e6e6e6;font-size:18px}
-  .btn{background:var(--brand);color:#fff;border:0;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer}
-  .tiny{font-size:13px;color:var(--muted);margin-top:8px}
-  .link{color:var(--brand);cursor:pointer;text-decoration:underline}
-  /* modal */
-  .modal-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45);z-index:999}
-  .modal-overlay.show{display:flex}
-  .modal{background:#fff;padding:18px;border-radius:12px;max-width:420px;width:92%}
-  .modal h3{margin-bottom:8px}
-  .muted-note{font-size:13px;color:#666}
+  /* Inline CSS - keep it simple & mobile-first */
+  body { font-family: system-ui,-apple-system,Segoe UI,Roboto; background:#0f172a; color:#e6eef8; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+  .card { background: linear-gradient(180deg,#0b1220, #0f1b38); padding:20px; border-radius:12px; width:92vw; max-width:420px; box-shadow: 0 10px 30px rgba(2,6,23,0.6); }
+  h1{ margin:0 0 8px; font-size:20px; text-align:center}
+  .logo { display:block; margin:0 auto 12px; width:140px; height:42px; object-fit:contain }
+  input[type="text"]{ width:100%; padding:14px; border-radius:8px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit; font-size:18px; text-align:center; letter-spacing:6px; }
+  button{ width:100%; padding:12px; margin-top:12px; border-radius:8px; border:0; background:#06b6d4; color:#042a2b; font-weight:700; font-size:16px; cursor:pointer; }
+  .note{ font-size:13px; opacity:0.8; margin-top:10px; text-align:center; }
+  .danger{ color:#ffb4b4; font-weight:700; }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <div class="logo">
-        <img src="logo.png" alt="Logo" />
-        <div>
-          <h1>Crypto Training — Login</h1>
-          <p class="sub">Enter the 6-digit PIN assigned to you.</p>
-        </div>
-      </div>
-
-      <div style="margin-top:12px">
-        <label class="tiny">Device ID (private)</label>
-        <div class="muted-note" id="deviceHelp">We will bind the PIN to this device on first use.</div>
-      </div>
-
-      <div style="margin-top:10px" class="pin-row">
-        <input id="pinInput" type="tel" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit PIN" />
-        <button id="loginBtn" class="btn">Login</button>
-      </div>
-
-      <div class="tiny">If you don't have a PIN, contact admin.</div>
-      <div style="margin-top:12px;text-align:center">
-        <a class="link" href="dashboard.html">Continue as guest</a>
-      </div>
+  <div class="card">
+    <img src="/logo.png" class="logo" alt="logo">
+    <h1>Enter your 6-digit PIN</h1>
+    <input id="pin" type="text" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••••" />
+    <button id="submit">Login with PIN</button>
+    <div class="note">If you share your PIN and another device uses it, the PIN will be automatically revoked.</div>
+    <div style="margin-top:10px; font-size:13px; text-align:center;">
+      <a href="/payment" style="color:#9be7ff">Buy a course / Make payment</a>
     </div>
-  </div>
-
-  <!-- Success / Warning Modal -->
-  <div id="modalSuccess" class="modal-overlay" aria-hidden="true">
-    <div class="modal">
-      <h3 id="modalTitle">Welcome</h3>
-      <div id="modalBody" class="muted-note"></div>
-      <div style="margin-top:12px;text-align:right">
-        <button id="modalOk" class="btn">Continue</button>
-      </div>
-    </div>
+    <div id="msg" style="margin-top:10px;text-align:center"></div>
   </div>
 
 <script>
-/* ---------- CONFIG ---------- */
-const API_BASE = "https://payme-update.onrender.com";
-
-/* ---------- device id helper ---------- */
-function getDeviceId() {
-  try {
-    let id = localStorage.getItem('device_id');
-    if (!id) {
-      // create simple uuid v4
-      id = 'd-' + ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
-        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
-      );
-      localStorage.setItem('device_id', id);
+  // generate a device id and store in localStorage (bound to this browser/device)
+  function getDeviceId(){
+    let id = localStorage.getItem("training_device_id");
+    if(!id){
+      id = 'dev-' + (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+      localStorage.setItem("training_device_id", id);
     }
     return id;
-  } catch (e) {
-    // fallback
-    let id = 'd-fallback-' + Date.now();
-    try { localStorage.setItem('device_id', id); } catch(e){}
-    return id;
-  }
-}
-
-const deviceId = getDeviceId();
-document.getElementById('deviceHelp').textContent = 'Device id: ' + deviceId + ' — PIN will be bound to this device.';
-
-/* ---------- modal helpers ---------- */
-const modal = document.getElementById('modalSuccess');
-const modalTitle = document.getElementById('modalTitle');
-const modalBody = document.getElementById('modalBody');
-const modalOk = document.getElementById('modalOk');
-function showModal(title, body, onOk){
-  modalTitle.textContent = title;
-  modalBody.textContent = body;
-  modal.classList.add('show');
-  modal.setAttribute('aria-hidden','false');
-  modalOk.focus();
-  modalOk.onclick = function(){ modal.classList.remove('show'); modal.setAttribute('aria-hidden','true'); if (onOk) onOk(); };
-}
-
-/* ---------- PIN login flow ---------- */
-document.getElementById('loginBtn').addEventListener('click', loginWithPin);
-document.getElementById('pinInput').addEventListener('keydown', function(e){
-  if (e.key === 'Enter') loginWithPin();
-});
-
-async function loginWithPin(){
-  const pin = (document.getElementById('pinInput').value || '').trim();
-  if (!/^\d{6}$/.test(pin)) {
-    showModal('Invalid PIN', 'Please enter a 6-digit numeric PIN.');
-    return;
   }
 
-  // POST to backend: /auth/validate_pin
-  try {
-    const res = await fetch(API_BASE + '/auth/validate_pin', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        pin: pin,
-        device_id: deviceId,
-        user_agent: navigator.userAgent
-      })
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      // backend returns { status: 'error', message: '...' }
-      showModal('Login failed', data && data.message ? data.message : 'Unknown error.');
+  const pinEl = document.getElementById('pin');
+  const msgEl = document.getElementById('msg');
+  document.getElementById('submit').addEventListener('click', async () => {
+    const pin = (pinEl.value || "").trim();
+    if(pin.length !== 6 || !/^\d{6}$/.test(pin)){
+      msgEl.innerHTML = '<span class="danger">Enter a valid 6-digit PIN</span>';
       return;
     }
-
-    // accepted, backend returns { status:'success', session_token, user: {id, username, phone, ...}, message }
-    if (data && data.status === 'success') {
-      // save session token + user
-      localStorage.setItem('session_token', data.session_token || '');
-      localStorage.setItem('loggedInUser', JSON.stringify(data.user || {}));
-      localStorage.setItem('user', JSON.stringify(data.user || {}));
-
-      // welcome popup then redirect to dashboard
-      showModal('Welcome', data.message || 'Login successful', function(){
-        window.location.href = 'dashboard.html';
+    const device_id = getDeviceId();
+    try{
+      const res = await fetch('/api/login', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({pin, device_id})
       });
-      return;
+      const data = await res.json();
+      if(data.success){
+        alert("Welcome! You have successfully logged in. ⚡"); // welcome popup
+        // show a small warning popup as requested
+        setTimeout(()=>alert("Warning: PIN works on a single device. Do not share your PIN."), 300);
+        // server set session cookie; redirect to dashboard
+        window.location.href = "/dashboard";
+      } else {
+        msgEl.innerHTML = '<span class="danger">' + (data.message || data.error || 'Login failed') + '</span>';
+      }
+    }catch(e){
+      msgEl.innerHTML = '<span class="danger">Network error</span>';
+      console.error(e);
     }
+  });
 
-    // If pin revoked or used by another device, backend should send proper code
-    showModal('Login failed', data.message || 'PIN invalid or revoked.');
-  } catch (err) {
-    console.error(err);
-    showModal('Network error', 'Could not reach server. Try again later.');
-  }
-}
+  // allow pressing Enter
+  pinEl.addEventListener('keyup', e => {
+    if(e.key === 'Enter') document.getElementById('submit').click();
+  });
 </script>
 </body>
 </html>
