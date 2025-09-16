@@ -1,82 +1,149 @@
-<!-- templates/authentication.html -->
+<!-- authentication.html
+     Inline CSS + JS
+     Admin PIN: 891959 -> redirects to /admin on successful login
+     Uses a stable hashed device fingerprint as device_id for backend login.
+-->
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Authentication — Crypto Training</title>
 <link rel="icon" href="/logo.png">
 <style>
-  /* Inline CSS - keep it simple & mobile-first */
-  body { font-family: system-ui,-apple-system,Segoe UI,Roboto; background:#0f172a; color:#e6eef8; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
-  .card { background: linear-gradient(180deg,#0b1220, #0f1b38); padding:20px; border-radius:12px; width:92vw; max-width:420px; box-shadow: 0 10px 30px rgba(2,6,23,0.6); }
-  h1{ margin:0 0 8px; font-size:20px; text-align:center}
-  .logo { display:block; margin:0 auto 12px; width:140px; height:42px; object-fit:contain }
-  input[type="text"]{ width:100%; padding:14px; border-radius:8px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit; font-size:18px; text-align:center; letter-spacing:6px; }
-  button{ width:100%; padding:12px; margin-top:12px; border-radius:8px; border:0; background:#06b6d4; color:#042a2b; font-weight:700; font-size:16px; cursor:pointer; }
-  .note{ font-size:13px; opacity:0.8; margin-top:10px; text-align:center; }
-  .danger{ color:#ffb4b4; font-weight:700; }
+  :root { --bg:#071024; --card:#062035; --accent:#06b6d4; --danger:#ffb4b4; color-scheme: dark; }
+  body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; font-family:system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#031025,#071024); color:#e6eef8;}
+  .card{ width:92vw; max-width:420px; background:linear-gradient(180deg,#071a2b,#041324); padding:20px; border-radius:12px; box-shadow:0 12px 30px rgba(2,6,23,0.7); }
+  .logo{ display:block; margin:0 auto 12px; width:140px; height:42px; object-fit:contain }
+  h1{ text-align:center; margin:6px 0 16px; font-size:18px;}
+  .pin{ width:100%; padding:14px; font-size:20px; text-align:center; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit; letter-spacing:8px; }
+  button{ width:100%; padding:12px; margin-top:12px; border-radius:10px; border:0; background:var(--accent); color:#042a2b; font-weight:700; cursor:pointer; font-size:16px; }
+  .note{ text-align:center; margin-top:10px; font-size:13px; opacity:0.9 }
+  .danger{ color:var(--danger); font-weight:700 }
+  .small{ font-size:12px; opacity:0.85; text-align:center; margin-top:8px }
+  #msg{ text-align:center; margin-top:10px; font-size:14px; min-height:22px }
 </style>
 </head>
 <body>
   <div class="card">
     <img src="/logo.png" class="logo" alt="logo">
-    <h1>Enter your 6-digit PIN</h1>
-    <input id="pin" type="text" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••••" />
-    <button id="submit">Login with PIN</button>
-    <div class="note">If you share your PIN and another device uses it, the PIN will be automatically revoked.</div>
-    <div style="margin-top:10px; font-size:13px; text-align:center;">
-      <a href="/payment" style="color:#9be7ff">Buy a course / Make payment</a>
-    </div>
-    <div id="msg" style="margin-top:10px;text-align:center"></div>
+    <h1>Enter your 6-digit PIN to continue</h1>
+
+    <input id="pin" class="pin" type="text" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="●●●●●●">
+
+    <button id="loginBtn">Login with PIN</button>
+
+    <div id="msg" aria-live="polite"></div>
+    <div class="small">If this PIN is used on another device it will be automatically revoked.</div>
+    <div class="note"><a href="/payment" style="color:#9be7ff;text-decoration:none">Buy a course / Make payment</a></div>
   </div>
 
 <script>
-  // generate a device id and store in localStorage (bound to this browser/device)
-  function getDeviceId(){
-    let id = localStorage.getItem("training_device_id");
-    if(!id){
-      id = 'dev-' + (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
-      localStorage.setItem("training_device_id", id);
+(async function(){
+  // --- utilities ---
+  async function getStableDeviceFingerprint(){
+    // persistent UUID + browser props -> SHA-256 -> hex
+    try {
+      let uuid = localStorage.getItem('training_device_uuid');
+      if(!uuid){
+        uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-' + Math.random().toString(36).slice(2));
+        localStorage.setItem('training_device_uuid', uuid);
+      }
+      const vals = [
+        navigator.userAgent || '',
+        navigator.platform || '',
+        (navigator.languages || []).join(','),
+        screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
+        Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+        uuid
+      ].join('||');
+      const enc = new TextEncoder().encode(vals);
+      const hash = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+    } catch(e){
+      // fallback
+      return (localStorage.getItem('training_device_uuid') || ('u-' + Math.random().toString(36).slice(2)));
     }
-    return id;
   }
 
+  const fp = await getStableDeviceFingerprint();
+  // store as a short visible id (for admin/device management)
+  const shortDevice = fp.slice(0,8);
+  // show a gentle console note for you
+  console.log('Device fingerprint (short):', shortDevice);
+
+  // --- DOM ---
   const pinEl = document.getElementById('pin');
   const msgEl = document.getElementById('msg');
-  document.getElementById('submit').addEventListener('click', async () => {
-    const pin = (pinEl.value || "").trim();
-    if(pin.length !== 6 || !/^\d{6}$/.test(pin)){
-      msgEl.innerHTML = '<span class="danger">Enter a valid 6-digit PIN</span>';
+  const loginBtn = document.getElementById('loginBtn');
+
+  function showMsg(text, danger=false){
+    msgEl.innerHTML = '<span style="color:' + (danger? '#ffb4b4' : '#bfefff') + '">' + text + '</span>';
+  }
+
+  // local rule: if allowed_device set and different from fp, block all logins client-side (extra safety)
+  const allowedDevice = localStorage.getItem('training_allowed_device'); // set on first admin login (optional)
+  if(allowedDevice && allowedDevice !== fp){
+    showMsg('This installation is locked to another device. Use that device or ask admin to reset.', true);
+    loginBtn.disabled = true;
+  }
+
+  // Press Enter to login
+  pinEl.addEventListener('keyup', e => { if(e.key === 'Enter') loginBtn.click(); });
+
+  loginBtn.addEventListener('click', async ()=>{
+    const pin = (pinEl.value || '').trim();
+    if(!/^\d{6}$/.test(pin)){
+      showMsg('Enter a valid 6-digit PIN', true);
       return;
     }
-    const device_id = getDeviceId();
-    try{
+    if(allowedDevice && allowedDevice !== fp){
+      showMsg('Login blocked: this site is locked to another device.', true);
+      return;
+    }
+
+    // Admin PIN special behavior: if first-time admin, set allowed device locally
+    // but still send device_id as fingerprint to backend so server assigns it too.
+    try {
+      showMsg('Logging in...');
       const res = await fetch('/api/login', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({pin, device_id})
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ pin: pin, device_id: fp })
       });
-      const data = await res.json();
-      if(data.success){
-        alert("Welcome! You have successfully logged in. ⚡"); // welcome popup
-        // show a small warning popup as requested
-        setTimeout(()=>alert("Warning: PIN works on a single device. Do not share your PIN."), 300);
-        // server set session cookie; redirect to dashboard
-        window.location.href = "/dashboard";
+      const j = await res.json();
+      if(res.ok && j.success){
+        // welcome + warning
+        alert('Welcome! You have successfully logged in.');
+        setTimeout(()=>alert('Warning: PIN works on a single device only. Do not share it.'), 200);
+
+        // If admin PIN used => mark local allowed_device (first time) and navigate to admin page
+        if(pin === '891959'){
+          // store allowed-device so only this browser is permitted client-side
+          localStorage.setItem('training_allowed_device', fp);
+          // mark admin in this tab
+          sessionStorage.setItem('training_is_admin', '1');
+          // small delay so cookie sets
+          window.location.href = '/admin';
+          return;
+        }
+
+        // For non-admin users, simply go to dashboard
+        window.location.href = '/dashboard';
       } else {
-        msgEl.innerHTML = '<span class="danger">' + (data.message || data.error || 'Login failed') + '</span>';
+        // backend returned error (401/403/etc)
+        const err = j.error || j.message || 'Login failed';
+        showMsg(err, true);
+        // if backend specifically revoked due to device mismatch, show special message
+        if(err.toLowerCase().includes('revok')) showMsg('This PIN was revoked (used on another device).', true);
       }
-    }catch(e){
-      msgEl.innerHTML = '<span class="danger">Network error</span>';
-      console.error(e);
+    } catch(err){
+      console.error(err);
+      showMsg('Network or server error. Check console.', true);
     }
   });
 
-  // allow pressing Enter
-  pinEl.addEventListener('keyup', e => {
-    if(e.key === 'Enter') document.getElementById('submit').click();
-  });
+})();
 </script>
 </body>
 </html>
