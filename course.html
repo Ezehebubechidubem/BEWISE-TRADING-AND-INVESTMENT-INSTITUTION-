@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Courses — Crypto Training</title>
+<style>
+ body{font-family:system-ui,Arial;background:#f6f7fb;margin:0;padding:20px}
+ .wrap{max-width:980px;margin:18px auto}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+ .card{background:#fff;padding:12px;border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.04);position:relative}
+ .title{font-weight:700;margin-bottom:6px}
+ .play{background:#00c853;color:#fff;padding:8px 10px;border-radius:8px;text-decoration:none;display:inline-block}
+ .video-modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);z-index:9999}
+ .video-modal.show{display:flex}
+ .video-card{background:#000;padding:10px;border-radius:10px;max-width:900px;width:96%}
+ video{width:100%;height:auto;border-radius:8px;background:#000}
+ .watermark{position:absolute;left:12px;top:12px;color:rgba(255,255,255,0.15);font-weight:800;font-size:14px;pointer-events:none;z-index:2000}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>All Lessons</h2>
+    <div id="list" class="grid"></div>
+  </div>
+
+  <!-- video modal -->
+  <div id="videoModal" class="video-modal" aria-hidden="true">
+    <div class="video-card">
+      <div style="position:relative">
+        <div id="wm" class="watermark"></div>
+        <video id="player" controls controlsList="nodownload nofullscreen noremoteplayback" disablePictureInPicture playsinline></video>
+      </div>
+      <div style="margin-top:8px;text-align:right">
+        <button id="closeVideo" style="padding:8px 10px;border-radius:8px;border:0;background:#fff;cursor:pointer">Close</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const API_BASE = "https://payme-update.onrender.com";
+const listEl = document.getElementById('list');
+const player = document.getElementById('player');
+const videoModal = document.getElementById('videoModal');
+const wm = document.getElementById('wm');
+
+const logged = JSON.parse(localStorage.getItem('loggedInUser') || localStorage.getItem('user') || 'null');
+const sessionToken = localStorage.getItem('session_token') || '';
+
+function showErrorModal(msg){ alert(msg); } // keep quick error; you can swap to modal easily
+
+// fetch videos list
+async function loadVideos(){
+  try {
+    const res = await fetch(API_BASE + '/videos', {headers: {'X-Session-Token': sessionToken}});
+    const data = await res.json();
+    if (!res.ok) { showErrorModal(data.message || 'Could not load videos'); return; }
+    // expected data: [{id, title, filename, url}]
+    data.forEach(v => {
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.innerHTML = `<div class="title">${escapeHtml(v.title)}</div>
+                        <div style="color:#666;margin-bottom:8px">Lesson #${v.id}</div>
+                        <div><a class="play" href="#" data-id="${v.id}" data-url="${encodeURIComponent(v.url)}">Play</a></div>`;
+      listEl.appendChild(div);
+    });
+  } catch (err) {
+    console.error(err);
+    showErrorModal('Network error while loading videos');
+  }
+}
+loadVideos();
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+/* play handler (delegated) */
+listEl.addEventListener('click', async function(e){
+  const a = e.target.closest('a[data-id]');
+  if (!a) return;
+  e.preventDefault();
+  const vid = a.dataset.id;
+  const url = decodeURIComponent(a.dataset.url);
+  // set watermark
+  const user = logged && (logged.username || logged.phone) ? (logged.username || logged.phone) : 'Guest';
+  wm.textContent = user + ' • ' + new Date().toLocaleString();
+  // fetch playable URL from backend to enforce token (if you have such endpoint)
+  try {
+    // If your backend exposes a signed URL endpoint: GET /video_stream/<id> (Authorization: token)
+    // For now we will play the provided url (backend should ensure only logged users can access)
+    player.src = url;
+    player.controls = true;
+    // disable context menu & keyboard shortcuts inside modal (best effort)
+    player.addEventListener('contextmenu', (ev)=> ev.preventDefault());
+    videoModal.classList.add('show');
+    videoModal.setAttribute('aria-hidden','false');
+    player.play().catch(()=>{ /* may require user gesture */ });
+  } catch (err){
+    console.error(err);
+    showErrorModal('Could not start video playback.');
+  }
+});
+
+document.getElementById('closeVideo').addEventListener('click', function(){
+  player.pause(); player.removeAttribute('src'); player.load();
+  videoModal.classList.remove('show'); videoModal.setAttribute('aria-hidden','true');
+});
+
+/* disable right click site-wide */
+document.addEventListener('contextmenu', function(e){ if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') e.preventDefault(); }, false);
+
+/* basic anti-screen-record heuristic: when user switches away (visibilitychange), pause */
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden && !player.paused) {
+    try { player.pause(); } catch(e) {}
+  }
+});
+</script>
+</body>
+</html>
