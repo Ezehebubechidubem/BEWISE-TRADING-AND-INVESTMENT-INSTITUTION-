@@ -8,6 +8,7 @@ from flask import (
     Flask, request, jsonify, render_template, send_from_directory, make_response, abort
 )
 from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
 
 # ---------------- Config ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,13 +23,22 @@ ALLOWED_DEVICE_HASH = os.environ.get("ALLOWED_DEVICE_HASH")   # optional lock-to
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_urlsafe(24))
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", 200 * 1024 * 1024))  # 200 MB default
 
+# Cookie secure behavior: set COOKIE_SECURE=0 for local http testing
+COOKIE_SECURE_FLAG = os.environ.get("COOKIE_SECURE", "1") == "1"
+
 # Flask app
 app = Flask(__name__, template_folder="templates", static_folder="static")
+# ensure static folder exists (avoid save errors)
+os.makedirs(app.static_folder or "static", exist_ok=True)
+
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 app.secret_key = SECRET_KEY
+
+# CORS: allow API calls from admin UI and allow cookies (credentials)
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -143,6 +153,7 @@ def request_entity_too_large(e):
 def handle_exception(e):
     # Log full exception but return a safe message to client
     logger.exception("Unhandled exception: %s", e)
+    # If Accept header prefers HTML, return plain HTML for "/" page errors
     return jsonify({"success": False, "error": "internal_server_error", "message": str(e)}), 500
 
 # -------------- Page Routes --------------
@@ -217,14 +228,17 @@ def api_login():
         db.session.add(p); db.session.commit()
         token = create_session(p.id, device_id)
         resp = jsonify({"success": True, "message": "logged_in", "role": ("admin" if p.pin == ADMIN_PIN else "user")})
-        resp.set_cookie("session_token", token, httponly=True, samesite="Lax")
+        # set cookie for cross-site usage when required
+        samesite_val = 'None' if COOKIE_SECURE_FLAG else 'Lax'
+        resp.set_cookie("session_token", token, httponly=True, samesite=samesite_val, secure=COOKIE_SECURE_FLAG)
         return resp
 
     # if device matches -> issue session
     if p.device_id == device_id:
         token = create_session(p.id, device_id)
         resp = jsonify({"success": True, "message": "logged_in", "role": ("admin" if p.pin == ADMIN_PIN else "user")})
-        resp.set_cookie("session_token", token, httponly=True, samesite="Lax")
+        samesite_val = 'None' if COOKIE_SECURE_FLAG else 'Lax'
+        resp.set_cookie("session_token", token, httponly=True, samesite=samesite_val, secure=COOKIE_SECURE_FLAG)
         return resp
 
     # different device -> revoke
