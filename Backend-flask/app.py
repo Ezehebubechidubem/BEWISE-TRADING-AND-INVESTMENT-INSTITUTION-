@@ -1,50 +1,62 @@
 # app.py
 import os
 import secrets
+import logging
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 from flask import (
-    Flask, request, jsonify, send_from_directory, render_template, make_response
+    Flask, request, jsonify, render_template, send_from_directory, make_response, abort
 )
 from flask_sqlalchemy import SQLAlchemy
 
+# ---------------- Config ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 DB_PATH = os.path.join(BASE_DIR, "data.db")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Configuration - adjust via environment variables on Render
-ADMIN_PIN = os.environ.get("ADMIN_PIN", "891959")             # admin PIN (default 891959)
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", ADMIN_PIN)  # optionally used as header
-ALLOWED_DEVICE_HASH = os.environ.get("ALLOWED_DEVICE_HASH")   # optional: lock whole app to one device
+# env-configurable
+ADMIN_PIN = os.environ.get("ADMIN_PIN", "891959")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", ADMIN_PIN)  # header fallback
+ALLOWED_DEVICE_HASH = os.environ.get("ALLOWED_DEVICE_HASH")   # optional lock-to-device
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_urlsafe(24))
+MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", 200 * 1024 * 1024))  # 200 MB default
 
+# Flask app
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 app.secret_key = SECRET_KEY
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("app")
 
 db = SQLAlchemy(app)
 
-# ----------------- Models -----------------
+# --------------- Models ----------------
 class Pin(db.Model):
+    __tablename__ = "pins"
     id = db.Column(db.Integer, primary_key=True)
     pin = db.Column(db.String(6), unique=True, nullable=False)
     note = db.Column(db.String(256))
-    device_id = db.Column(db.String(512))   # fingerprint assigned to
+    device_id = db.Column(db.String(512))
     ip = db.Column(db.String(64))
     revoked = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     assigned_at = db.Column(db.DateTime, nullable=True)
 
 class Video(db.Model):
+    __tablename__ = "videos"
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(512))
     filename = db.Column(db.String(1024))
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Payment(db.Model):
+    __tablename__ = "payments"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200))
     email = db.Column(db.String(200))
@@ -53,23 +65,24 @@ class Payment(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Session(db.Model):
+    __tablename__ = "sessions"
     token = db.Column(db.String(128), primary_key=True)
-    pin_id = db.Column(db.Integer, db.ForeignKey("pin.id"))
+    pin_id = db.Column(db.Integer, db.ForeignKey("pins.id"))
     device_id = db.Column(db.String(512))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime)
 
-# ----------------- Utilities -----------------
+# --------------- Utilities --------------
 def now():
     return datetime.utcnow()
 
 def generate_pin():
-    # generate unique 6-digit pin
-    for _ in range(10):
+    """Generate a unique 6-digit PIN (tries up to a few times)."""
+    for _ in range(20):
         candidate = "{:06d}".format(secrets.randbelow(900000) + 100000)
         if not Pin.query.filter_by(pin=candidate).first():
             return candidate
-    raise RuntimeError("Failed to generate unique PIN")
+    raise RuntimeError("Unable to generate unique PIN")
 
 def create_session(pin_id, device_id, hours=24):
     token = secrets.token_urlsafe(40)
@@ -87,22 +100,20 @@ def validate_session(token):
     if s.expires_at < now():
         try:
             db.session.delete(s); db.session.commit()
-        except:
+        except Exception:
             pass
         return None
     p = Pin.query.get(s.pin_id)
     if not p or p.revoked:
         try:
             db.session.delete(s); db.session.commit()
-        except:
+        except Exception:
             pass
         return None
     return s
 
 def admin_auth_ok(req):
-    # admin authorized if:
-    # 1) header X-ADMIN-PW equals ADMIN_PASSWORD OR
-    # 2) current session belongs to admin PIN
+    """Admin authorized if header matches ADMIN_PASSWORD OR session belongs to admin pin."""
     header = req.headers.get("X-ADMIN-PW")
     if header and header == ADMIN_PASSWORD:
         return True
@@ -114,17 +125,39 @@ def admin_auth_ok(req):
             return True
     return False
 
-# ----------------- Init DB & ensure admin PIN -----------------
+# -------------- Init DB -----------------
 with app.app_context():
     db.create_all()
+    # Ensure admin PIN exists
     if not Pin.query.filter_by(pin=ADMIN_PIN).first():
         p = Pin(pin=ADMIN_PIN, note="admin-pin", created_at=now(), revoked=False)
         db.session.add(p); db.session.commit()
+        logger.info("Admin pin created: %s", ADMIN_PIN)
 
-# ----------------- Pages -----------------
-@app.route("/")
-def index():
-    return render_template("authentication.html")
+# -------------- Error Handling -----------
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    return jsonify({"success": False, "error": "file_too_large"}), 413
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log full exception but return a safe message to client
+    logger.exception("Unhandled exception: %s", e)
+    return jsonify({"success": False, "error": "internal_server_error", "message": str(e)}), 500
+
+# -------------- Page Routes --------------
+@app.route("/", methods=["GET"])
+def root():
+    # Serve authentication page (render_template preferred)
+    try:
+        return render_template("authentication.html")
+    except Exception as e:
+        # Fallback: try to serve file directly
+        template_path = os.path.join(app.template_folder or "templates", "authentication.html")
+        if os.path.exists(template_path):
+            return send_from_directory(app.template_folder, "authentication.html")
+        # ultimate fallback: small HTML
+        return "<h1>Crypto Training Backend</h1><p>Place authentication.html in templates/</p>", 200
 
 @app.route("/dashboard")
 def dashboard_page():
@@ -142,29 +175,41 @@ def payment_page():
 def admin_page():
     return render_template("admin.html")
 
-# ----------------- API -----------------
+# Serve logo or static fallback
+@app.route("/logo.png")
+def logo():
+    path = os.path.join(app.static_folder or "static", "logo.png")
+    if os.path.exists(path):
+        return send_from_directory(app.static_folder, "logo.png")
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'>"
+           "<rect width='100%' height='100%' fill='#444'/>"
+           "<text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#fff' font-size='18'>LOGO</text></svg>")
+    resp = make_response(svg)
+    resp.headers['Content-Type'] = 'image/svg+xml'
+    return resp
+
+# -------------- API: Auth ----------------
 @app.route("/api/login", methods=["POST"])
 def api_login():
-    data = request.get_json() or {}
+    data = (request.get_json() or {})
     pin = (data.get("pin") or "").strip()
     device_id = (data.get("device_id") or "").strip()
     ip = request.remote_addr
 
-    if not pin or len(pin) != 6:
+    if not pin or len(pin) != 6 or not pin.isdigit():
         return jsonify({"success": False, "error": "invalid_pin_format"}), 400
 
-    # Optional server lock to specific device
+    # server-side device lock
     if ALLOWED_DEVICE_HASH and device_id and device_id != ALLOWED_DEVICE_HASH:
-        return jsonify({"success": False, "error": "device_not_allowed", "message": "This installation is locked to a specific device."}), 403
+        return jsonify({"success": False, "error": "device_not_allowed", "message": "Installation locked to a specific device."}), 403
 
     p = Pin.query.filter_by(pin=pin).first()
     if not p:
         return jsonify({"success": False, "error": "pin_not_found"}), 404
-
     if p.revoked:
         return jsonify({"success": False, "error": "pin_revoked"}), 403
 
-    # Unassigned -> assign to this device
+    # assign on first use
     if not p.device_id:
         p.device_id = device_id
         p.ip = ip
@@ -175,14 +220,14 @@ def api_login():
         resp.set_cookie("session_token", token, httponly=True, samesite="Lax")
         return resp
 
-    # Assigned and matches -> issue session
+    # if device matches -> issue session
     if p.device_id == device_id:
         token = create_session(p.id, device_id)
         resp = jsonify({"success": True, "message": "logged_in", "role": ("admin" if p.pin == ADMIN_PIN else "user")})
         resp.set_cookie("session_token", token, httponly=True, samesite="Lax")
         return resp
 
-    # Assigned to different device -> revoke and deny
+    # different device -> revoke
     p.revoked = True
     db.session.add(p); db.session.commit()
     return jsonify({"success": False, "error": "revoked_due_to_multiple_devices", "message": "PIN revoked because it was used on another device."}), 403
@@ -194,12 +239,7 @@ def api_check_session():
     if not s:
         return jsonify({"logged_in": False})
     p = Pin.query.get(s.pin_id)
-    return jsonify({
-        "logged_in": True,
-        "pin_id": s.pin_id,
-        "device_id": s.device_id,
-        "is_admin": (p.pin == ADMIN_PIN if p else False)
-    })
+    return jsonify({"logged_in": True, "pin_id": s.pin_id, "device_id": s.device_id, "is_admin": (p.pin == ADMIN_PIN if p else False)})
 
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
@@ -212,6 +252,7 @@ def api_logout():
     resp.delete_cookie("session_token")
     return resp
 
+# -------------- API: Videos -------------
 @app.route("/api/videos")
 def api_videos():
     rows = Video.query.order_by(Video.uploaded_at.desc()).all()
@@ -234,7 +275,7 @@ def stream_video(video_id):
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
 
-# Admin endpoints: require admin_auth_ok
+# -------------- API: Admin -------------
 @app.route("/api/admin/upload_video", methods=["POST"])
 def api_admin_upload_video():
     if not admin_auth_ok(request):
@@ -254,7 +295,7 @@ def api_admin_upload_video():
 def api_admin_generate_pin():
     if not admin_auth_ok(request):
         return jsonify({"success": False, "error": "admin_auth_required"}), 403
-    note = (request.json or {}).get("note", "")[:200]
+    note = (request.get_json() or {}).get("note", "")[:200]
     pin = generate_pin()
     p = Pin(pin=pin, note=note, created_at=now(), revoked=False)
     db.session.add(p); db.session.commit()
@@ -289,6 +330,7 @@ def api_admin_revoke_pin():
     db.session.add(p); db.session.commit()
     return jsonify({"success": True})
 
+# -------------- API: Payment ------------
 @app.route("/api/payment/proof", methods=["POST"])
 def api_payment_proof():
     name = request.form.get("name", "")
@@ -304,16 +346,7 @@ def api_payment_proof():
     db.session.add(pay); db.session.commit()
     return jsonify({"success": True})
 
-@app.route("/logo.png")
-def logo():
-    path = os.path.join(app.static_folder, "logo.png")
-    if os.path.exists(path):
-        return send_from_directory(app.static_folder, "logo.png")
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='200' height='60'><rect width='100%' height='100%' fill='#444'/>"
-           "<text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#fff' font-size='18'>LOGO</text></svg>")
-    resp = make_response(svg)
-    resp.headers['Content-Type'] = 'image/svg+xml'
-    return resp
-
+# -------------- Run ---------------------
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    debug_flag = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(debug=debug_flag, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
