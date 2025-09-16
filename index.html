@@ -1,8 +1,4 @@
-<!-- authentication.html
-     Inline CSS + JS
-     Admin PIN: 891959 -> redirects to /admin on successful login
-     Uses a stable hashed device fingerprint as device_id for backend login.
--->
+<!-- authentication.html -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -11,101 +7,44 @@
 <title>Authentication — Crypto Training</title>
 <link rel="icon" href="/logo.png">
 <style>
-  :root { --bg:#071024; --card:#062035; --accent:#06b6d4; --danger:#ffb4b4; color-scheme: dark; }
-  body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; font-family:system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#031025,#071024); color:#e6eef8;}
-  .card{ width:92vw; max-width:420px; background:linear-gradient(180deg,#071a2b,#041324); padding:20px; border-radius:12px; box-shadow:0 12px 30px rgba(2,6,23,0.7); }
-  .logo{ display:block; margin:0 auto 12px; width:140px; height:42px; object-fit:contain }
-  h1{ text-align:center; margin:6px 0 16px; font-size:18px;}
-  .pin{ width:100%; padding:14px; font-size:20px; text-align:center; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit; letter-spacing:8px; }
-  button{ width:100%; padding:12px; margin-top:12px; border-radius:10px; border:0; background:var(--accent); color:#042a2b; font-weight:700; cursor:pointer; font-size:16px; }
-  .note{ text-align:center; margin-top:10px; font-size:13px; opacity:0.9 }
-  .danger{ color:var(--danger); font-weight:700 }
-  .small{ font-size:12px; opacity:0.85; text-align:center; margin-top:8px }
-  #msg{ text-align:center; margin-top:10px; font-size:14px; min-height:22px }
+  body{font-family:system-ui; margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#071024; color:#e6eef8}
+  .card{width:92vw; max-width:420px; padding:18px; border-radius:12px; background:linear-gradient(180deg,#071a2b,#041324)}
+  .logo{display:block; width:140px; margin:0 auto 10px}
+  .pin{width:100%; padding:12px; font-size:20px; text-align:center; border-radius:8px; background:transparent; border:1px solid rgba(255,255,255,0.06)}
+  button{width:100%; padding:12px; margin-top:12px; border-radius:8px; border:0; background:#06b6d4; color:#042a2b; font-weight:700}
+  .msg{margin-top:10px; text-align:center}
 </style>
 </head>
 <body>
   <div class="card">
     <img src="/logo.png" class="logo" alt="logo">
-    <h1>Enter your 6-digit PIN to continue</h1>
-
-    <input id="pin" class="pin" type="text" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="●●●●●●">
-
-    <button id="loginBtn">Login with PIN</button>
-
-    <div id="msg" aria-live="polite"></div>
-    <div class="small">If this PIN is used on another device it will be automatically revoked.</div>
-    <div class="note"><a href="/payment" style="color:#9be7ff;text-decoration:none">Buy a course / Make payment</a></div>
+    <h2 style="text-align:center">Enter 6-digit PIN</h2>
+    <input id="pin" class="pin" maxlength="6" inputmode="numeric" placeholder="●●●●●●">
+    <button id="btn">Login</button>
+    <div class="msg" id="msg"></div>
+    <p style="text-align:center; font-size:13px; margin-top:8px">If the PIN is used on another device it will be revoked automatically.</p>
+    <p style="text-align:center"><a href="/payment" style="color:#9be7ff">Buy course / Payment</a></p>
   </div>
 
 <script>
 (async function(){
-  // --- utilities ---
-  async function getStableDeviceFingerprint(){
-    // persistent UUID + browser props -> SHA-256 -> hex
+  // compute stable fingerprint (same method across pages)
+  async function computeFP(){
+    let uuid = localStorage.getItem('training_device_uuid');
+    if(!uuid){ uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)); localStorage.setItem('training_device_uuid', uuid); }
+    const data = [navigator.userAgent || '', navigator.platform || '', (navigator.languages || []).join(','), screen.width+'x'+screen.height+'x'+screen.colorDepth, Intl.DateTimeFormat().resolvedOptions().timeZone || '', uuid].join('||');
+    const enc = new TextEncoder().encode(data);
+    const hashBuf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  const fp = await computeFP();
+  const msg = document.getElementById('msg');
+  document.getElementById('btn').addEventListener('click', async ()=>{
+    const pin = (document.getElementById('pin').value || '').trim();
+    if(!/^\d{6}$/.test(pin)){ msg.innerText = 'Enter a valid 6-digit PIN'; return; }
     try {
-      let uuid = localStorage.getItem('training_device_uuid');
-      if(!uuid){
-        uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-' + Math.random().toString(36).slice(2));
-        localStorage.setItem('training_device_uuid', uuid);
-      }
-      const vals = [
-        navigator.userAgent || '',
-        navigator.platform || '',
-        (navigator.languages || []).join(','),
-        screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
-        Intl.DateTimeFormat().resolvedOptions().timeZone || '',
-        uuid
-      ].join('||');
-      const enc = new TextEncoder().encode(vals);
-      const hash = await crypto.subtle.digest('SHA-256', enc);
-      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
-    } catch(e){
-      // fallback
-      return (localStorage.getItem('training_device_uuid') || ('u-' + Math.random().toString(36).slice(2)));
-    }
-  }
-
-  const fp = await getStableDeviceFingerprint();
-  // store as a short visible id (for admin/device management)
-  const shortDevice = fp.slice(0,8);
-  // show a gentle console note for you
-  console.log('Device fingerprint (short):', shortDevice);
-
-  // --- DOM ---
-  const pinEl = document.getElementById('pin');
-  const msgEl = document.getElementById('msg');
-  const loginBtn = document.getElementById('loginBtn');
-
-  function showMsg(text, danger=false){
-    msgEl.innerHTML = '<span style="color:' + (danger? '#ffb4b4' : '#bfefff') + '">' + text + '</span>';
-  }
-
-  // local rule: if allowed_device set and different from fp, block all logins client-side (extra safety)
-  const allowedDevice = localStorage.getItem('training_allowed_device'); // set on first admin login (optional)
-  if(allowedDevice && allowedDevice !== fp){
-    showMsg('This installation is locked to another device. Use that device or ask admin to reset.', true);
-    loginBtn.disabled = true;
-  }
-
-  // Press Enter to login
-  pinEl.addEventListener('keyup', e => { if(e.key === 'Enter') loginBtn.click(); });
-
-  loginBtn.addEventListener('click', async ()=>{
-    const pin = (pinEl.value || '').trim();
-    if(!/^\d{6}$/.test(pin)){
-      showMsg('Enter a valid 6-digit PIN', true);
-      return;
-    }
-    if(allowedDevice && allowedDevice !== fp){
-      showMsg('Login blocked: this site is locked to another device.', true);
-      return;
-    }
-
-    // Admin PIN special behavior: if first-time admin, set allowed device locally
-    // but still send device_id as fingerprint to backend so server assigns it too.
-    try {
-      showMsg('Logging in...');
+      msg.innerText = 'Logging in...';
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
@@ -113,36 +52,23 @@
       });
       const j = await res.json();
       if(res.ok && j.success){
-        // welcome + warning
-        alert('Welcome! You have successfully logged in.');
-        setTimeout(()=>alert('Warning: PIN works on a single device only. Do not share it.'), 200);
-
-        // If admin PIN used => mark local allowed_device (first time) and navigate to admin page
+        alert('Welcome! Logged in.');
+        setTimeout(()=>alert('Warning: PIN works on a single device. Do not share it.'), 200);
         if(pin === '891959'){
-          // store allowed-device so only this browser is permitted client-side
-          localStorage.setItem('training_allowed_device', fp);
-          // mark admin in this tab
           sessionStorage.setItem('training_is_admin', '1');
-          // small delay so cookie sets
-          window.location.href = '/admin';
-          return;
+          localStorage.setItem('training_allowed_device', fp); // client-side lock for convenience
+          location.href = '/admin';
+        } else {
+          location.href = '/dashboard';
         }
-
-        // For non-admin users, simply go to dashboard
-        window.location.href = '/dashboard';
       } else {
-        // backend returned error (401/403/etc)
-        const err = j.error || j.message || 'Login failed';
-        showMsg(err, true);
-        // if backend specifically revoked due to device mismatch, show special message
-        if(err.toLowerCase().includes('revok')) showMsg('This PIN was revoked (used on another device).', true);
+        msg.innerText = j.message || j.error || 'Login failed';
       }
-    } catch(err){
-      console.error(err);
-      showMsg('Network or server error. Check console.', true);
+    } catch(e){
+      console.error(e);
+      msg.innerText = 'Network error';
     }
   });
-
 })();
 </script>
 </body>
