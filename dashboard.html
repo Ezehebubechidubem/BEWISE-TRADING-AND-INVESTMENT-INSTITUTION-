@@ -1,72 +1,57 @@
+<!-- templates/dashboard.html -->
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Dashboard — Crypto Training</title>
+<link rel="icon" href="/logo.png">
 <style>
-  body{font-family:system-ui,Arial;background:#f6f7fb;margin:0;padding:20px}
-  .wrap{max-width:900px;margin:18px auto}
-  .card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 8px 28px rgba(0,0,0,.06)}
-  .top{display:flex;align-items:center;gap:12px}
-  .logo img{width:56px;height:56px;border-radius:8px}
-  h2{margin:0}
-  .grid{display:flex;gap:12px;margin-top:18px}
-  .tile{flex:1;padding:14px;border-radius:10px;background:#fff;border:1px solid #eee;text-align:center}
-  a.btn{display:inline-block;background:#00c853;color:white;padding:10px 12px;border-radius:8px;text-decoration:none}
+  body{font-family:system-ui,Segoe UI; margin:0; background:#071024; color:#e6eef8}
+  header{display:flex; align-items:center; gap:12px; padding:14px; background:linear-gradient(90deg,#06203a,#08304d)}
+  .logo{height:36px}
+  .container{padding:20px}
+  .card{background:#062035; padding:18px; border-radius:12px; max-width:820px; margin:12px auto}
+  .links a{display:inline-block; margin-right:12px; padding:10px 14px; border-radius:10px; text-decoration:none; background:#06b6d4; color:#042a2b; font-weight:700}
+  #logout{background:#ef4444; color:white}
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card top">
-      <div class="logo"><img src="logo.png" alt="logo"></div>
-      <div style="flex:1">
-        <h2 id="welcome">Welcome</h2>
-        <div id="sub" style="color:#666">Access your courses and payments</div>
-      </div>
-      <div>
-        <a id="logout" class="btn" href="#">Log out</a>
-      </div>
+<header>
+  <img src="/logo.png" class="logo" alt="logo">
+  <h3 style="margin:0">Crypto Training — Dashboard</h3>
+</header>
+<div class="container">
+  <div class="card">
+    <h2 id="welcome">Welcome</h2>
+    <p>Use the links below to go to the course or payment pages.</p>
+    <div class="links">
+      <a href="/course">Courses</a>
+      <a href="/payment">Payment</a>
+      <a href="/admin">Admin</a>
+      <a id="logout" href="#" onclick="logout()">Logout</a>
     </div>
-
-    <div style="height:14px"></div>
-
-    <div class="grid">
-      <div class="tile">
-        <h3>Courses</h3>
-        <p>All video lessons</p>
-        <a href="course.html" class="btn">Go to Courses</a>
-      </div>
-      <div class="tile">
-        <h3>Payments</h3>
-        <p>See courses & pay</p>
-        <a href="payment.html" class="btn">Payments</a>
-      </div>
-      <div class="tile" id="adminTile" style="display:none">
-        <h3>Admin</h3>
-        <p>Manage PINs & Upload videos</p>
-        <a href="admin.html" class="btn">Admin</a>
-      </div>
-    </div>
+    <div id="status" style="margin-top:10px; font-size:14px; opacity:0.9"></div>
   </div>
+</div>
 
 <script>
-const user = JSON.parse(localStorage.getItem('loggedInUser') || localStorage.getItem('user') || 'null');
-if (user && user.username) {
-  document.getElementById('welcome').textContent = 'Hi, ' + (user.username || user.name || 'Student');
-  // show admin tile if user.is_admin === true (the backend can set that flag)
-  if (user.is_admin) document.getElementById('adminTile').style.display = 'block';
-} else {
-  document.getElementById('welcome').textContent = 'Hi, Guest';
-}
+  async function check(){
+    const r = await fetch('/api/check_session');
+    const j = await r.json();
+    if(!j.logged_in){
+      // not logged in -> redirect to authentication
+      window.location.href = "/";
+      return;
+    }
+    document.getElementById('welcome').innerText = "Welcome — your device is registered.";
+    document.getElementById('status').innerText = "Device ID: " + j.device_id;
+  }
+  check();
 
-document.getElementById('logout').addEventListener('click', function(e){
-  e.preventDefault();
-  localStorage.removeItem('session_token');
-  localStorage.removeItem('loggedInUser');
-  localStorage.removeItem('user');
-  window.location.href = 'authentication.html';
-});
+  async function logout(){
+    await fetch('/api/logout', {method:'POST'});
+    window.location.href = "/";
+  }
 </script>
 </body>
 </html>
