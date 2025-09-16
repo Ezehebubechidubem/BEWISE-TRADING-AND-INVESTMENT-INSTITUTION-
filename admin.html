@@ -1,206 +1,310 @@
-<!-- admin.html
-     Admin UI (generate pins, view pins, upload videos, revoke pin)
-     This client sends X-ADMIN-PW: 891959 for admin API calls.
-     NOTE: Set your server ADMIN_PASSWORD=891959 on Render for server-side APIs to accept these requests.
--->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Admin — Crypto Training</title>
+<title>Admin Panel — Crypto Training</title>
 <link rel="icon" href="/logo.png">
 <style>
-  body{ margin:0; font-family:system-ui,Segoe UI; background:linear-gradient(180deg,#031025,#071024); color:#e6eef8 }
-  header{ display:flex; align-items:center; gap:12px; padding:12px; background:linear-gradient(90deg,#06203a,#08304d) }
+  :root{ --bg:#071024; --card:#062035; --accent:#06b6d4; --danger:#ef4444; color-scheme: dark; }
+  body{ margin:0; font-family:system-ui,Segoe UI,Roboto,Arial; background:linear-gradient(180deg,#031025,#071024); color:#e6eef8 }
+  header{ display:flex; align-items:center; gap:12px; padding:14px; background:linear-gradient(90deg,#06203a,#08304d) }
   .logo{ height:36px }
-  .wrap{ padding:18px; max-width:1100px; margin:auto }
-  .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px }
-  .card{ background:#062035; padding:12px; border-radius:12px }
-  input,textarea{ width:100%; padding:8px; border-radius:8px; margin-top:6px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit }
-  button{ padding:8px 12px; border-radius:8px; border:0; background:#06b6d4; color:#042a2b; font-weight:700; cursor:pointer }
-  table{ width:100%; border-collapse:collapse; margin-top:8px }
-  th,td{ padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); text-align:left }
-  .danger{ background:#ef4444; color:white }
+  .container{ padding:18px; max-width:1100px; margin:18px auto }
+  .row{ display:grid; grid-template-columns: repeat(auto-fit,minmax(300px,1fr)); gap:12px; margin-bottom:12px }
+  .card{ background:var(--card); padding:12px; border-radius:12px; box-shadow:0 8px 20px rgba(2,6,23,0.6) }
+  input,textarea,select{ width:100%; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit; box-sizing:border-box }
+  button{ padding:10px 12px; border-radius:8px; border:0; background:var(--accent); color:#042a2b; font-weight:700; cursor:pointer }
+  button.danger{ background:var(--danger); color:white }
+  table{ width:100%; border-collapse:collapse; margin-top:10px }
+  th,td{ padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); text-align:left; font-size:13px }
+  .small{ font-size:13px; opacity:0.9 }
+  .muted{ opacity:0.8; font-size:13px }
+  .hint{ margin-top:8px; font-size:13px; opacity:0.9 }
 </style>
 </head>
 <body>
 <header>
   <img src="/logo.png" class="logo" alt="logo">
   <div>
-    <div style="font-weight:700">Admin Panel</div>
-    <div style="font-size:12px;opacity:0.9">Manage course videos & PINs</div>
+    <div style="font-weight:700">Admin Panel — Crypto Training</div>
+    <div style="font-size:12px; opacity:0.9">Use PIN <strong>891959</strong> (admin) to access this page on your device</div>
   </div>
 </header>
 
-<div class="wrap">
-  <div style="margin-bottom:12px">
-    <button id="btnRefresh">Refresh data</button>
-    <button id="btnResetLock" style="margin-left:8px">Reset local device lock</button>
-    <span style="opacity:0.9;margin-left:12px">Admin PIN (server header): <strong>891959</strong>. Ensure server ADMIN_PASSWORD matches this.</span>
-  </div>
-
-  <div class="grid">
-    <div class="card">
-      <h3>Generate PIN</h3>
-      <input id="note" placeholder="Optional note (e.g. user name)">
-      <button id="genPin">Generate 6-digit PIN</button>
-      <div id="newPin" style="margin-top:10px; font-weight:700"></div>
-    </div>
-
-    <div class="card">
-      <h3>Upload video</h3>
-      <input id="video_title" placeholder="Video title">
-      <input id="video_file" type="file" accept="video/*">
-      <button id="uploadVideo">Upload video</button>
-      <div id="uploadMsg" style="margin-top:8px"></div>
+<div class="container">
+  <div style="display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px">
+    <div class="muted">Admin header secret used in API calls: <strong>891959</strong></div>
+    <div>
+      <button id="btnRefresh">Refresh</button>
+      <button id="btnLogout" style="margin-left:8px" class="danger">Logout</button>
     </div>
   </div>
 
-  <div style="margin-top:14px" class="card">
-    <h3>Existing pins</h3>
-    <div id="pinsArea">Loading pins...</div>
+  <div class="row">
+    <div class="card">
+      <h3 style="margin:0 0 8px">Generate PIN</h3>
+      <label class="muted">Note (student name or email)</label>
+      <input id="noteInput" placeholder="e.g. John Doe / john@example.com">
+      <button id="btnGenerate">Generate 6-digit PIN</button>
+      <div id="generateResult" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 8px">Upload Video</h3>
+      <label class="muted">Video Title</label>
+      <input id="videoTitle" placeholder="Lesson 1 - Intro">
+      <label class="muted">Video File</label>
+      <input id="videoFile" type="file" accept="video/*">
+      <button id="btnUpload">Upload Video</button>
+      <div id="uploadResult" class="hint"></div>
+    </div>
   </div>
 
-  <div style="margin-top:14px" class="card">
-    <h3>Uploaded videos</h3>
-    <div id="videosArea">Loading videos...</div>
+  <div class="row">
+    <div class="card">
+      <h3 style="margin:0 0 8px">Active PINs</h3>
+      <div id="pinsArea">Loading pins...</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 8px">Uploaded Videos</h3>
+      <div id="videosArea">Loading videos...</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <h3 style="margin:0 0 8px">Notes & Tips</h3>
+    <ul class="muted">
+      <li>Make sure your server env `ADMIN_PASSWORD` (or ADMIN_PIN) equals <strong>891959</strong>.</li>
+      <li>Admin access requires you to have logged in using the admin PIN (891959) on this device — that sets a client-side admin flag. Use the authentication page for that.</li>
+      <li>Server-side device binding is the secure mechanism: the first device to use a pin becomes the assigned device. If another device tries the same PIN it is revoked (server enforces this).</li>
+    </ul>
   </div>
 </div>
 
 <script>
 (async function(){
-  // always include admin header with this secret (per your request)
-  const ADMIN_HEADER_VALUE = '891959';
+  // ------------ config ------------
+  const ADMIN_HEADER = '891959'; // header value sent to admin endpoints (must match server ADMIN_PASSWORD)
+  const API_PREFIX = '/api';      // all endpoints use /api/* on the server
 
-  // device fingerprint helper (same as other pages)
-  async function getFP(){
+  // ------------ helpers ------------
+  async function checkServerSession(){
     try {
-      let uuid = localStorage.getItem('training_device_uuid');
-      if(!uuid){ uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)); localStorage.setItem('training_device_uuid', uuid); }
-      const vals = [navigator.userAgent, navigator.platform, (navigator.languages||[]).join(','), screen.width+'x'+screen.height+'x'+screen.colorDepth, Intl.DateTimeFormat().resolvedOptions().timeZone||'', uuid].join('||');
-      const enc = new TextEncoder().encode(vals);
-      const hash = await crypto.subtle.digest('SHA-256', enc);
-      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
-    } catch(e){ return localStorage.getItem('training_device_uuid') || 'local-fallback'; }
+      const res = await fetch(API_PREFIX + '/check_session', { credentials: 'same-origin' });
+      const j = await res.json();
+      return j && j.logged_in;
+    } catch(e){
+      console.error('check_session error', e);
+      return false;
+    }
   }
 
-  const fp = await getFP();
+  function show(el, text){
+    el.innerText = text;
+  }
 
-  // Simple session check
-  const chk = await (await fetch('/api/check_session')).json();
-  if(!chk.logged_in){
-    alert('You must login first with the admin PIN (891959) on the registered device.');
+  function makeTable(rows, columns){
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    columns.forEach(c => { const th = document.createElement('th'); th.innerText = c; trh.appendChild(th); });
+    thead.appendChild(trh); table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      columns.forEach(c => {
+        const td = document.createElement('td');
+        td.innerHTML = r[c] !== undefined ? r[c] : '';
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  // ------------ init & auth check ------------
+  const isLoggedIn = await checkServerSession();
+  const isAdminFlag = sessionStorage.getItem('training_is_admin') === '1'; // authentication page sets this when you login with pin 891959
+
+  if(!isLoggedIn){
+    alert('You are not logged in. Please login with PIN 891959 on the authentication page (on this device).');
     window.location.href = '/';
     return;
   }
-
-  // If local allowed device isn't set yet, set it if this is admin session
-  if(!localStorage.getItem('training_allowed_device') && sessionStorage.getItem('training_is_admin')){
-    localStorage.setItem('training_allowed_device', fp);
+  if(!isAdminFlag){
+    // allow access ONLY if user logged in as admin in this tab
+    alert('Admin access requires logging in with the admin PIN (891959) from the authentication page. Please login as admin on this device first.');
+    window.location.href = '/';
+    return;
   }
 
   // DOM refs
   const pinsArea = document.getElementById('pinsArea');
   const videosArea = document.getElementById('videosArea');
-  document.getElementById('genPin').addEventListener('click', generatePin);
-  document.getElementById('uploadVideo').addEventListener('click', uploadVideo);
-  document.getElementById('btnRefresh').addEventListener('click', () => { loadPins(); loadVideos(); });
-  document.getElementById('btnResetLock').addEventListener('click', ()=>{
-    if(confirm('Remove local device lock? This only clears this browser\'s lock (other devices unchanged).')) {
-      localStorage.removeItem('training_allowed_device');
-      alert('Local device lock cleared. Be careful — this does not change server assignment for already-used PINs.');
-    }
-  });
+  const btnGenerate = document.getElementById('btnGenerate');
+  const noteInput = document.getElementById('noteInput');
+  const generateResult = document.getElementById('generateResult');
+  const btnUpload = document.getElementById('btnUpload');
+  const videoTitle = document.getElementById('videoTitle');
+  const videoFile = document.getElementById('videoFile');
+  const uploadResult = document.getElementById('uploadResult');
+  const btnRefresh = document.getElementById('btnRefresh');
+  const btnLogout = document.getElementById('btnLogout');
 
-  async function generatePin(){
-    const note = document.getElementById('note').value || '';
-    try {
-      const res = await fetch('/api/admin/generate_pin', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'X-ADMIN-PW': ADMIN_HEADER_VALUE },
-        body: JSON.stringify({note})
-      });
-      const j = await res.json();
-      if(res.ok && j.success){
-        document.getElementById('newPin').innerText = 'New PIN: ' + j.pin + ' (give to user)';
-        loadPins();
-      } else {
-        document.getElementById('newPin').innerText = 'Error: ' + (j.error || j.message || 'failed');
-      }
-    } catch(e){ console.error(e); document.getElementById('newPin').innerText = 'Network error'; }
-  }
-
-  async function uploadVideo(){
-    const t = document.getElementById('video_title').value || '';
-    const f = document.getElementById('video_file').files[0];
-    if(!t || !f){ document.getElementById('uploadMsg').innerText = 'Provide title and video file'; return; }
-    const fd = new FormData();
-    fd.append('title', t);
-    fd.append('video', f);
-    // also include admin password in form for compatibility
-    fd.append('admin_pw', ADMIN_HEADER_VALUE);
-    try {
-      const res = await fetch('/api/admin/upload_video', { method:'POST', body: fd });
-      const j = await res.json();
-      if(res.ok && j.success){ document.getElementById('uploadMsg').innerText = 'Uploaded ✓'; loadVideos(); }
-      else { document.getElementById('uploadMsg').innerText = 'Upload failed: ' + (j.error || j.message || ''); }
-    } catch(e){ console.error(e); document.getElementById('uploadMsg').innerText = 'Network error'; }
-  }
-
+  // ------------ actions ------------
   async function loadPins(){
+    pinsArea.innerText = 'Loading pins...';
     try {
-      const res = await fetch('/api/admin/pins', { headers: {'X-ADMIN-PW': ADMIN_HEADER_VALUE }});
-      const j = await res.json();
-      if(!Array.isArray(j)){ pinsArea.innerText = 'Unable to load pins (auth?).'; return; }
-      let html = '<table><tr><th>ID</th><th>PIN</th><th>Note</th><th>Device</th><th>IP</th><th>Revoked</th><th>Action</th></tr>';
-      for(const p of j){
-        html += `<tr>
-          <td>${p.id}</td>
-          <td>${p.pin}</td>
-          <td>${p.note||''}</td>
-          <td>${p.device_id||''}</td>
-          <td>${p.ip||''}</td>
-          <td>${p.revoked? 'YES':''}</td>
-          <td>${p.revoked? '': `<button data-id="${p.id}" class="revokeBtn">Revoke</button>`}</td>
-        </tr>`;
-      }
-      html += '</table>';
-      pinsArea.innerHTML = html;
-      // attach revoke handlers
-      document.querySelectorAll('.revokeBtn').forEach(btn=>{
-        btn.addEventListener('click', async (e)=>{
-          const id = e.target.getAttribute('data-id');
-          if(!confirm('Revoke pin #' + id + '?')) return;
-          const res = await fetch('/api/admin/revoke_pin', {
-            method:'POST',
-            headers: {'Content-Type':'application/json', 'X-ADMIN-PW': ADMIN_HEADER_VALUE},
-            body: JSON.stringify({ pin_id: Number(id) })
-          });
-          const j = await res.json();
-          if(res.ok && j.success) loadPins(); else alert('Failed to revoke');
-        });
+      const res = await fetch(API_PREFIX + '/admin/pins', {
+        headers: { 'X-ADMIN-PW': ADMIN_HEADER },
+        credentials: 'same-origin'
       });
-    } catch(e){ console.error(e); pinsArea.innerText = 'Error loading pins'; }
+      const j = await res.json();
+      if(!Array.isArray(j)){
+        pinsArea.innerText = 'Failed to load pins. Check server auth.';
+        return;
+      }
+      // build table with action buttons
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      ['ID','PIN','Note','Device','IP','Revoked','Action'].forEach(h => { const th = document.createElement('th'); th.innerText = h; headRow.appendChild(th); });
+      thead.appendChild(headRow); table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      j.forEach(p => {
+        const tr = document.createElement('tr');
+        const add = (val) => { const td = document.createElement('td'); td.innerText = val===null||val===undefined? '': val; tr.appendChild(td); };
+        add(p.id); add(p.pin); add(p.note); add(p.device_id); add(p.ip); add(p.revoked ? 'YES':'');
+        const tdAction = document.createElement('td');
+        if(!p.revoked){
+          const btn = document.createElement('button');
+          btn.innerText = 'Revoke';
+          btn.style.padding = '6px 8px';
+          btn.addEventListener('click', async ()=>{
+            if(!confirm('Revoke PIN ' + p.pin + ' ?')) return;
+            try {
+              const r = await fetch(API_PREFIX + '/admin/revoke_pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-ADMIN-PW': ADMIN_HEADER },
+                body: JSON.stringify({ pin_id: p.id }),
+                credentials: 'same-origin'
+              });
+              const jr = await r.json();
+              if(r.ok && jr.success){ loadPins(); alert('Revoked'); }
+              else alert('Failed to revoke: ' + (jr.error || jr.message || 'server'));
+            } catch(e){ console.error(e); alert('Network error'); }
+          });
+          tdAction.appendChild(btn);
+        } else {
+          tdAction.innerText = '-';
+        }
+        tr.appendChild(tdAction);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      pinsArea.innerHTML = '';
+      pinsArea.appendChild(table);
+    } catch(e){
+      console.error(e); pinsArea.innerText = 'Error loading pins';
+    }
   }
 
   async function loadVideos(){
+    videosArea.innerText = 'Loading videos...';
     try {
-      const res = await fetch('/api/videos');
+      const res = await fetch(API_PREFIX + '/videos', { credentials:'same-origin' });
       const j = await res.json();
       if(!Array.isArray(j)){ videosArea.innerText = 'No videos or error'; return; }
-      let html = '<table><tr><th>Title</th><th>Uploaded</th></tr>';
-      for(const v of j){
-        html += `<tr><td>${v.title}</td><td>${v.uploaded_at}</td></tr>`;
-      }
-      html += '</table>';
-      videosArea.innerHTML = html;
-    } catch(e){ console.error(e); videosArea.innerText = 'Error loading videos'; }
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      ['ID','Title','Uploaded'].forEach(h => { const th = document.createElement('th'); th.innerText = h; headRow.appendChild(th); });
+      thead.appendChild(headRow); table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      j.forEach(v => {
+        const tr = document.createElement('tr');
+        const tdId = document.createElement('td'); tdId.innerText = v.id; tr.appendChild(tdId);
+        const tdTitle = document.createElement('td'); tdTitle.innerText = v.title; tr.appendChild(tdTitle);
+        const tdUp = document.createElement('td'); tdUp.innerText = v.uploaded_at || ''; tr.appendChild(tdUp);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      videosArea.innerHTML = '';
+      videosArea.appendChild(table);
+    } catch(e){
+      console.error(e);
+      videosArea.innerText = 'Error loading videos';
+    }
   }
 
-  // init
-  await loadPins();
-  await loadVideos();
+  btnGenerate.addEventListener('click', async ()=>{
+    const note = (noteInput.value || '').slice(0,200);
+    generateResult.innerText = 'Generating...';
+    try {
+      const res = await fetch(API_PREFIX + '/admin/generate_pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-ADMIN-PW': ADMIN_HEADER },
+        body: JSON.stringify({ note }),
+        credentials: 'same-origin'
+      });
+      const j = await res.json();
+      if(res.ok && j.success){
+        generateResult.innerText = 'New PIN: ' + j.pin;
+        noteInput.value = '';
+        loadPins();
+      } else {
+        generateResult.innerText = 'Error: ' + (j.error || j.message || 'server');
+      }
+    } catch(e){
+      console.error(e); generateResult.innerText = 'Network error';
+    }
+  });
+
+  btnUpload.addEventListener('click', async ()=>{
+    const title = (videoTitle.value || '').trim();
+    const file = videoFile.files[0];
+    if(!title || !file){ uploadResult.innerText = 'Provide title and file'; return; }
+    uploadResult.innerText = 'Uploading...';
+    try {
+      const fd = new FormData();
+      fd.append('title', title);
+      fd.append('video', file);
+      // include admin_pw form field as fallback for servers that read form value
+      fd.append('admin_pw', ADMIN_HEADER);
+      const res = await fetch(API_PREFIX + '/admin/upload_video', {
+        method: 'POST',
+        headers: { 'X-ADMIN-PW': ADMIN_HEADER }, // Append header too
+        body: fd,
+        credentials: 'same-origin'
+      });
+      const j = await res.json();
+      if(res.ok && j.success){ uploadResult.innerText = 'Uploaded ✓'; videoTitle.value = ''; videoFile.value = ''; loadVideos(); }
+      else uploadResult.innerText = 'Upload failed: ' + (j.error || j.message || '');
+    } catch(e){
+      console.error(e);
+      uploadResult.innerText = 'Network error';
+    }
+  });
+
+  btnRefresh.addEventListener('click', ()=>{ loadPins(); loadVideos(); });
+
+  btnLogout.addEventListener('click', async ()=>{
+    if(!confirm('Logout admin?')) return;
+    try {
+      await fetch(API_PREFIX + '/logout', { method:'POST', credentials:'same-origin' });
+    } catch(e){ console.error(e); }
+    sessionStorage.removeItem('training_is_admin');
+    // do not clear local allowed device here unless you want to
+    location.href = '/';
+  });
+
+  // initial load
+  loadPins();
+  loadVideos();
+
 })();
 </script>
 </body>
