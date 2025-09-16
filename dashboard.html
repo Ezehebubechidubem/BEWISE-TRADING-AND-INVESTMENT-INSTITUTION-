@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Dashboard — Crypto Training</title>
+<style>
+  body{font-family:system-ui,Arial;background:#f6f7fb;margin:0;padding:20px}
+  .wrap{max-width:900px;margin:18px auto}
+  .card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 8px 28px rgba(0,0,0,.06)}
+  .top{display:flex;align-items:center;gap:12px}
+  .logo img{width:56px;height:56px;border-radius:8px}
+  h2{margin:0}
+  .grid{display:flex;gap:12px;margin-top:18px}
+  .tile{flex:1;padding:14px;border-radius:10px;background:#fff;border:1px solid #eee;text-align:center}
+  a.btn{display:inline-block;background:#00c853;color:white;padding:10px 12px;border-radius:8px;text-decoration:none}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card top">
+      <div class="logo"><img src="logo.png" alt="logo"></div>
+      <div style="flex:1">
+        <h2 id="welcome">Welcome</h2>
+        <div id="sub" style="color:#666">Access your courses and payments</div>
+      </div>
+      <div>
+        <a id="logout" class="btn" href="#">Log out</a>
+      </div>
+    </div>
+
+    <div style="height:14px"></div>
+
+    <div class="grid">
+      <div class="tile">
+        <h3>Courses</h3>
+        <p>All video lessons</p>
+        <a href="course.html" class="btn">Go to Courses</a>
+      </div>
+      <div class="tile">
+        <h3>Payments</h3>
+        <p>See courses & pay</p>
+        <a href="payment.html" class="btn">Payments</a>
+      </div>
+      <div class="tile" id="adminTile" style="display:none">
+        <h3>Admin</h3>
+        <p>Manage PINs & Upload videos</p>
+        <a href="admin.html" class="btn">Admin</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+const user = JSON.parse(localStorage.getItem('loggedInUser') || localStorage.getItem('user') || 'null');
+if (user && user.username) {
+  document.getElementById('welcome').textContent = 'Hi, ' + (user.username || user.name || 'Student');
+  // show admin tile if user.is_admin === true (the backend can set that flag)
+  if (user.is_admin) document.getElementById('adminTile').style.display = 'block';
+} else {
+  document.getElementById('welcome').textContent = 'Hi, Guest';
+}
+
+document.getElementById('logout').addEventListener('click', function(e){
+  e.preventDefault();
+  localStorage.removeItem('session_token');
+  localStorage.removeItem('loggedInUser');
+  localStorage.removeItem('user');
+  window.location.href = 'authentication.html';
+});
+</script>
+</body>
+</html>
