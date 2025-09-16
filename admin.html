@@ -1,149 +1,207 @@
-<!-- templates/admin.html -->
+<!-- admin.html
+     Admin UI (generate pins, view pins, upload videos, revoke pin)
+     This client sends X-ADMIN-PW: 891959 for admin API calls.
+     NOTE: Set your server ADMIN_PASSWORD=891959 on Render for server-side APIs to accept these requests.
+-->
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Admin — Crypto Training</title>
 <link rel="icon" href="/logo.png">
 <style>
-  body{font-family:system-ui; margin:0; background:#071024; color:#e6eef8}
-  header{display:flex; align-items:center; gap:12px; padding:12px; background:linear-gradient(90deg,#06203a,#08304d)}
-  .logo{height:36px}
-  .wrap{padding:18px; max-width:980px; margin:0 auto}
-  .row{display:flex; gap:12px; flex-wrap:wrap}
-  .card{background:#062035; padding:12px; border-radius:12px; flex:1 1 320px}
-  input,textarea{width:100%; padding:8px; border-radius:8px; margin-top:6px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit}
-  button{padding:10px 12px; border-radius:8px; border:0; background:#06b6d4; color:#042a2b; font-weight:700; cursor:pointer}
-  table{width:100%; border-collapse:collapse; margin-top:10px}
-  th,td{padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); text-align:left}
+  body{ margin:0; font-family:system-ui,Segoe UI; background:linear-gradient(180deg,#031025,#071024); color:#e6eef8 }
+  header{ display:flex; align-items:center; gap:12px; padding:12px; background:linear-gradient(90deg,#06203a,#08304d) }
+  .logo{ height:36px }
+  .wrap{ padding:18px; max-width:1100px; margin:auto }
+  .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px }
+  .card{ background:#062035; padding:12px; border-radius:12px }
+  input,textarea{ width:100%; padding:8px; border-radius:8px; margin-top:6px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:inherit }
+  button{ padding:8px 12px; border-radius:8px; border:0; background:#06b6d4; color:#042a2b; font-weight:700; cursor:pointer }
+  table{ width:100%; border-collapse:collapse; margin-top:8px }
+  th,td{ padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); text-align:left }
+  .danger{ background:#ef4444; color:white }
 </style>
 </head>
 <body>
-<header><img src="/logo.png" class="logo"><h3 style="margin:0">Admin</h3></header>
-<div class="wrap">
-  <div class="row">
-    <div class="card">
-      <h3>Admin login</h3>
-      <p>Enter admin password (default: admin123).</p>
-      <input id="admin_pw" placeholder="Admin password">
-      <button onclick="loginAdmin()">Login</button>
-      <div id="adminMsg" style="margin-top:8px"></div>
-    </div>
+<header>
+  <img src="/logo.png" class="logo" alt="logo">
+  <div>
+    <div style="font-weight:700">Admin Panel</div>
+    <div style="font-size:12px;opacity:0.9">Manage course videos & PINs</div>
+  </div>
+</header>
 
+<div class="wrap">
+  <div style="margin-bottom:12px">
+    <button id="btnRefresh">Refresh data</button>
+    <button id="btnResetLock" style="margin-left:8px">Reset local device lock</button>
+    <span style="opacity:0.9;margin-left:12px">Admin PIN (server header): <strong>891959</strong>. Ensure server ADMIN_PASSWORD matches this.</span>
+  </div>
+
+  <div class="grid">
     <div class="card">
       <h3>Generate PIN</h3>
-      <input id="note" placeholder="Optional note (user name/email)">
-      <button onclick="generatePin()">Generate 6-digit PIN</button>
-      <div id="newPin" style="margin-top:8px; font-weight:700"></div>
+      <input id="note" placeholder="Optional note (e.g. user name)">
+      <button id="genPin">Generate 6-digit PIN</button>
+      <div id="newPin" style="margin-top:10px; font-weight:700"></div>
     </div>
-  </div>
 
-  <div class="row" style="margin-top:12px">
     <div class="card">
-      <h3>Upload Video</h3>
-      <input id="video_title" placeholder="Title">
+      <h3>Upload video</h3>
+      <input id="video_title" placeholder="Video title">
       <input id="video_file" type="file" accept="video/*">
-      <button onclick="uploadVideo()">Upload</button>
+      <button id="uploadVideo">Upload video</button>
       <div id="uploadMsg" style="margin-top:8px"></div>
     </div>
-
-    <div class="card">
-      <h3>Pins (latest)</h3>
-      <div id="pinsWrapper">Please login to see pins.</div>
-    </div>
   </div>
 
-  <div style="margin-top:20px" class="card">
-    <h3>Uploaded Videos</h3>
-    <div id="videosWrapper">Please login to see videos.</div>
+  <div style="margin-top:14px" class="card">
+    <h3>Existing pins</h3>
+    <div id="pinsArea">Loading pins...</div>
+  </div>
+
+  <div style="margin-top:14px" class="card">
+    <h3>Uploaded videos</h3>
+    <div id="videosArea">Loading videos...</div>
   </div>
 </div>
 
 <script>
-  // admin password stored client-side temporarily and sent via header for admin-only API calls
-  let ADMIN_PW = null;
+(async function(){
+  // always include admin header with this secret (per your request)
+  const ADMIN_HEADER_VALUE = '891959';
 
-  function loginAdmin(){
-    ADMIN_PW = document.getElementById('admin_pw').value || '';
-    document.getElementById('adminMsg').innerText = "Admin password set in this tab.";
-    refreshPins();
-    refreshVideos();
+  // device fingerprint helper (same as other pages)
+  async function getFP(){
+    try {
+      let uuid = localStorage.getItem('training_device_uuid');
+      if(!uuid){ uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)); localStorage.setItem('training_device_uuid', uuid); }
+      const vals = [navigator.userAgent, navigator.platform, (navigator.languages||[]).join(','), screen.width+'x'+screen.height+'x'+screen.colorDepth, Intl.DateTimeFormat().resolvedOptions().timeZone||'', uuid].join('||');
+      const enc = new TextEncoder().encode(vals);
+      const hash = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+    } catch(e){ return localStorage.getItem('training_device_uuid') || 'local-fallback'; }
   }
 
-  async function generatePin(){
-    if(!ADMIN_PW){ alert('Enter admin password first'); return; }
-    const note = document.getElementById('note').value || '';
-    const res = await fetch('/api/admin/generate_pin', {
-      method:'POST',
-      headers: {'Content-Type':'application/json', 'X-ADMIN-PW': ADMIN_PW},
-      body: JSON.stringify({note})
-    });
-    const j = await res.json();
-    if(j.success){
-      document.getElementById('newPin').innerText = "New pin: " + j.pin;
-      refreshPins();
-    } else {
-      document.getElementById('newPin').innerText = "Error: " + (j.error || 'server');
+  const fp = await getFP();
+
+  // Simple session check
+  const chk = await (await fetch('/api/check_session')).json();
+  if(!chk.logged_in){
+    alert('You must login first with the admin PIN (891959) on the registered device.');
+    window.location.href = '/';
+    return;
+  }
+
+  // If local allowed device isn't set yet, set it if this is admin session
+  if(!localStorage.getItem('training_allowed_device') && sessionStorage.getItem('training_is_admin')){
+    localStorage.setItem('training_allowed_device', fp);
+  }
+
+  // DOM refs
+  const pinsArea = document.getElementById('pinsArea');
+  const videosArea = document.getElementById('videosArea');
+  document.getElementById('genPin').addEventListener('click', generatePin);
+  document.getElementById('uploadVideo').addEventListener('click', uploadVideo);
+  document.getElementById('btnRefresh').addEventListener('click', () => { loadPins(); loadVideos(); });
+  document.getElementById('btnResetLock').addEventListener('click', ()=>{
+    if(confirm('Remove local device lock? This only clears this browser\'s lock (other devices unchanged).')) {
+      localStorage.removeItem('training_allowed_device');
+      alert('Local device lock cleared. Be careful — this does not change server assignment for already-used PINs.');
     }
+  });
+
+  async function generatePin(){
+    const note = document.getElementById('note').value || '';
+    try {
+      const res = await fetch('/api/admin/generate_pin', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'X-ADMIN-PW': ADMIN_HEADER_VALUE },
+        body: JSON.stringify({note})
+      });
+      const j = await res.json();
+      if(res.ok && j.success){
+        document.getElementById('newPin').innerText = 'New PIN: ' + j.pin + ' (give to user)';
+        loadPins();
+      } else {
+        document.getElementById('newPin').innerText = 'Error: ' + (j.error || j.message || 'failed');
+      }
+    } catch(e){ console.error(e); document.getElementById('newPin').innerText = 'Network error'; }
   }
 
   async function uploadVideo(){
-    if(!ADMIN_PW){ alert('Enter admin password first'); return; }
-    const title = document.getElementById('video_title').value || '';
+    const t = document.getElementById('video_title').value || '';
     const f = document.getElementById('video_file').files[0];
-    if(!title || !f){ alert('Provide title and file'); return; }
+    if(!t || !f){ document.getElementById('uploadMsg').innerText = 'Provide title and video file'; return; }
     const fd = new FormData();
-    fd.append('title', title);
+    fd.append('title', t);
     fd.append('video', f);
-    fd.append('admin_pw', ADMIN_PW);
-    const res = await fetch('/api/admin/upload_video', {method:'POST', body:fd});
-    const j = await res.json();
-    if(j.success) {
-      document.getElementById('uploadMsg').innerText = 'Uploaded ✓';
-      refreshVideos();
-    } else {
-      document.getElementById('uploadMsg').innerText = 'Upload failed: ' + (j.error||'');
-    }
+    // also include admin password in form for compatibility
+    fd.append('admin_pw', ADMIN_HEADER_VALUE);
+    try {
+      const res = await fetch('/api/admin/upload_video', { method:'POST', body: fd });
+      const j = await res.json();
+      if(res.ok && j.success){ document.getElementById('uploadMsg').innerText = 'Uploaded ✓'; loadVideos(); }
+      else { document.getElementById('uploadMsg').innerText = 'Upload failed: ' + (j.error || j.message || ''); }
+    } catch(e){ console.error(e); document.getElementById('uploadMsg').innerText = 'Network error'; }
   }
 
-  async function refreshPins(){
-    if(!ADMIN_PW){ document.getElementById('pinsWrapper').innerText = 'Please login to view pins.'; return; }
-    const res = await fetch('/api/admin/pins', {headers:{'X-ADMIN-PW': ADMIN_PW}});
-    const j = await res.json();
-    if(!Array.isArray(j)){ document.getElementById('pinsWrapper').innerText = 'Auth required.'; return; }
-    let html = '<table><tr><th>ID</th><th>PIN</th><th>Note</th><th>Device</th><th>IP</th><th>Revoked</th><th>Action</th></tr>';
-    for(const p of j){
-      html += `<tr><td>${p.id}</td><td>${p.pin}</td><td>${p.note||''}</td><td>${p.device_id||''}</td><td>${p.ip||''}</td><td>${p.revoked? 'YES':''}</td>` +
-        `<td>${p.revoked? '': `<button onclick="revokePin(${p.id})">Revoke</button>`}</td></tr>`;
-    }
-    html += '</table>';
-    document.getElementById('pinsWrapper').innerHTML = html;
+  async function loadPins(){
+    try {
+      const res = await fetch('/api/admin/pins', { headers: {'X-ADMIN-PW': ADMIN_HEADER_VALUE }});
+      const j = await res.json();
+      if(!Array.isArray(j)){ pinsArea.innerText = 'Unable to load pins (auth?).'; return; }
+      let html = '<table><tr><th>ID</th><th>PIN</th><th>Note</th><th>Device</th><th>IP</th><th>Revoked</th><th>Action</th></tr>';
+      for(const p of j){
+        html += `<tr>
+          <td>${p.id}</td>
+          <td>${p.pin}</td>
+          <td>${p.note||''}</td>
+          <td>${p.device_id||''}</td>
+          <td>${p.ip||''}</td>
+          <td>${p.revoked? 'YES':''}</td>
+          <td>${p.revoked? '': `<button data-id="${p.id}" class="revokeBtn">Revoke</button>`}</td>
+        </tr>`;
+      }
+      html += '</table>';
+      pinsArea.innerHTML = html;
+      // attach revoke handlers
+      document.querySelectorAll('.revokeBtn').forEach(btn=>{
+        btn.addEventListener('click', async (e)=>{
+          const id = e.target.getAttribute('data-id');
+          if(!confirm('Revoke pin #' + id + '?')) return;
+          const res = await fetch('/api/admin/revoke_pin', {
+            method:'POST',
+            headers: {'Content-Type':'application/json', 'X-ADMIN-PW': ADMIN_HEADER_VALUE},
+            body: JSON.stringify({ pin_id: Number(id) })
+          });
+          const j = await res.json();
+          if(res.ok && j.success) loadPins(); else alert('Failed to revoke');
+        });
+      });
+    } catch(e){ console.error(e); pinsArea.innerText = 'Error loading pins'; }
   }
 
-  async function revokePin(id){
-    if(!ADMIN_PW) return alert('Login first');
-    const res = await fetch('/api/admin/revoke_pin', {
-      method:'POST',
-      headers: {'Content-Type':'application/json', 'X-ADMIN-PW': ADMIN_PW},
-      body: JSON.stringify({pin_id:id})
-    });
-    const j = await res.json();
-    if(j.success){ refreshPins(); }
-    else alert('Failed to revoke');
+  async function loadVideos(){
+    try {
+      const res = await fetch('/api/videos');
+      const j = await res.json();
+      if(!Array.isArray(j)){ videosArea.innerText = 'No videos or error'; return; }
+      let html = '<table><tr><th>Title</th><th>Uploaded</th></tr>';
+      for(const v of j){
+        html += `<tr><td>${v.title}</td><td>${v.uploaded_at}</td></tr>`;
+      }
+      html += '</table>';
+      videosArea.innerHTML = html;
+    } catch(e){ console.error(e); videosArea.innerText = 'Error loading videos'; }
   }
 
-  async function refreshVideos(){
-    if(!ADMIN_PW){ document.getElementById('videosWrapper').innerText = 'Please login to view videos.'; return; }
-    const res = await fetch('/api/videos'); // no auth needed for metadata
-    const j = await res.json();
-    if(!Array.isArray(j)){ document.getElementById('videosWrapper').innerText = 'No videos'; return; }
-    let html = '<table><tr><th>Title</th><th>Uploaded</th></tr>';
-    for(const v of j){
-      html += `<tr><td>${v.title}</td><td>${v.uploaded_at}</td></tr>`;
-    }
-    html += '</table>';
-    document.getElementById('videosWrapper').innerHTML = html;
-  }
+  // init
+  await loadPins();
+  await loadVideos();
+})();
 </script>
 </body>
 </html>
