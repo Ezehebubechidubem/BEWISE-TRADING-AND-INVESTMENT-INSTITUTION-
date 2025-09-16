@@ -96,7 +96,13 @@
 
 <script>
 (async function(){
-  const API = '/api';   // all endpoints are relative
+  // ---------- IMPORTANT: API endpoint selection ----------
+  // If this page is loaded from your Render host, use relative /api routes (same-origin).
+  // Otherwise use the absolute Render URL so the admin UI can call the backend from anywhere.
+  const RENDER_API = 'https://bewise-trading-and-investment-institution.onrender.com/api';
+  const API = (location.hostname === 'bewise-trading-and-investment-institution.onrender.com') ? '/api' : RENDER_API;
+  // -------------------------------------------------------
+
   const pinsArea = document.getElementById('pinsArea');
   const videosArea = document.getElementById('videosArea');
   const btnGenerate = document.getElementById('btnGenerate');
