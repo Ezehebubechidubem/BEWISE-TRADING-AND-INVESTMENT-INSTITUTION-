@@ -1,81 +1,106 @@
-<!-- templates/course.html -->
+<!-- course.html
+     Course listing + player
+     Streaming endpoint used: /stream/{video_id} (server-side checks cookie session_token)
+     Best-effort anti-download & screenshot protections added.
+-->
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Courses — Crypto Training</title>
 <link rel="icon" href="/logo.png">
 <style>
-  body{font-family:system-ui; margin:0; background:#071024; color:#e6eef8}
-  header{display:flex; align-items:center; gap:12px; padding:12px; background:linear-gradient(90deg,#06203a,#08304d)}
-  .logo{height:36px}
-  .wrap{padding:18px; max-width:900px; margin:0 auto}
-  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px}
-  .card{background:#062035; padding:12px; border-radius:12px; position:relative; overflow:hidden}
-  video{width:100%; height:auto; border-radius:8px; background:black}
-  .title{margin-top:8px; font-weight:700}
-  /* Disable text selection & right-click */
-  *{user-select:none; -webkit-user-select:none; -ms-user-select:none}
+  body{ margin:0; font-family:system-ui,Segoe UI; background:linear-gradient(180deg,#031025,#071024); color:#e6eef8 }
+  header{ display:flex; align-items:center; gap:12px; padding:12px; background:linear-gradient(90deg,#06203a,#08304d) }
+  .logo{ height:36px }
+  .wrap{ padding:18px; max-width:1100px; margin:auto }
+  .grid{ display:grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:14px }
+  .card{ background:#062035; padding:12px; border-radius:12px; overflow:hidden; position:relative }
+  video{ width:100%; border-radius:8px; background:black; }
+  .title{ margin-top:10px; font-weight:700 }
+  /* UI anti-tamper */
+  *{ user-select:none; -webkit-user-select:none; -ms-user-select:none }
 </style>
 </head>
 <body>
-<header><img src="/logo.png" class="logo"><h3 style="margin:0">Courses</h3></header>
+<header><img src="/logo.png" class="logo" alt="logo"><div style="font-weight:700">Courses</div></header>
 <div class="wrap">
-  <p style="opacity:0.9">You can watch videos here. Downloading is disabled (best-effort). Screenshots and screen recording can't be fully prevented on the web — see note below.</p>
+  <p style="opacity:0.9">Watch the lessons below. Download and right-click are disabled (best effort).</p>
   <div id="grid" class="grid"></div>
-  <div style="margin-top:12px; font-size:13px; opacity:0.8">
-    <strong>Note:</strong> A web app cannot absolutely prevent OS-level screenshots / recording. For production-grade protection use DRM solutions or a native app.
+  <div style="margin-top:12px; font-size:13px; opacity:0.85">
+    <strong>Note:</strong> Complete protection against OS screenshots/recording requires DRM or a native app. This page implements in-browser best-effort protections.
   </div>
 </div>
 
 <script>
-  // block right click
-  document.addEventListener('contextmenu', e => e.preventDefault());
-
-  async function loadVideos(){
-    const res = await fetch('/api/videos');
-    const videos = await res.json();
-    const grid = document.getElementById('grid');
-    grid.innerHTML = '';
-    for(const v of videos){
-      const card = document.createElement('div'); card.className = 'card';
-      const vid = document.createElement('video');
-      // no download option
-      vid.setAttribute('controls', ''); 
-      vid.setAttribute('controlsList', 'nodownload nofullscreen noremoteplayback');
-      vid.setAttribute('playsinline','');
-      vid.setAttribute('webkit-playsinline','');
-      vid.oncontextmenu = e => e.preventDefault();
-
-      // source uses stream endpoint (server checks session cookie)
-      vid.src = '/stream/' + v.id;
-      const t = document.createElement('div'); t.className='title'; t.innerText = v.title || 'Untitled';
-      card.appendChild(vid);
-      card.appendChild(t);
-      grid.appendChild(card);
-      // small measure: hide controls if not logged in
-      vid.addEventListener('play', async ()=>{
-        const chk = await (await fetch('/api/check_session')).json();
-        if(!chk.logged_in){
-          vid.pause();
-          alert('Please login with your PIN first.');
-          window.location.href = '/';
-        }
-      });
-    }
+(async function(){
+  // device fingerprint check (same method)
+  async function getFP(){
+    try {
+      let uuid = localStorage.getItem('training_device_uuid');
+      if(!uuid){ uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)); localStorage.setItem('training_device_uuid', uuid); }
+      const vals = [navigator.userAgent, navigator.platform, (navigator.languages||[]).join(','), screen.width+'x'+screen.height+'x'+screen.colorDepth, Intl.DateTimeFormat().resolvedOptions().timeZone||'', uuid].join('||');
+      const enc = new TextEncoder().encode(vals);
+      const hash = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+    } catch(e){ return localStorage.getItem('training_device_uuid') || 'local-fallback'; }
+  }
+  const fp = await getFP();
+  const allowed = localStorage.getItem('training_allowed_device');
+  if(allowed && allowed !== fp){
+    alert('This installation is locked to another device. Redirecting to login.');
+    window.location.href = '/';
+    return;
   }
 
-  // Blur video when page loses visibility (makes simple anti-snoop)
-  document.addEventListener('visibilitychange', ()=>{
-    const vids = document.querySelectorAll('video');
-    if(document.visibilityState !== 'visible'){
-      vids.forEach(v => { try{ v.style.filter='blur(6px)'; }catch(e){} });
-    } else {
-      vids.forEach(v => { try{ v.style.filter='none'; }catch(e){} });
+  // check session
+  const chk = await (await fetch('/api/check_session')).json();
+  if(!chk.logged_in){ window.location.href='/'; return; }
+
+  // load videos metadata
+  async function load(){
+    const res = await fetch('/api/videos');
+    const list = await res.json();
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    if(!Array.isArray(list) || list.length===0){
+      grid.innerHTML = '<div style="opacity:0.8">No videos uploaded yet.</div>';
+      return;
     }
+    list.forEach(v=>{
+      const card = document.createElement('div'); card.className='card';
+      const vid = document.createElement('video');
+      vid.setAttribute('controls','');
+      // remove download control, no fullscreen to reduce unwanted capture (not perfect)
+      vid.setAttribute('controlsList','nodownload nofullscreen noremoteplayback');
+      vid.setAttribute('playsinline','');
+      // source is backend protected endpoint
+      vid.src = '/stream/' + v.id;
+      // stop playback unless session check passes (defense-in-depth)
+      vid.addEventListener('play', async ()=>{
+        const j = await (await fetch('/api/check_session')).json();
+        if(!j.logged_in){ vid.pause(); alert('Please login first'); window.location.href='/'; }
+      });
+      const title = document.createElement('div'); title.className='title'; title.innerText = v.title || 'Untitled';
+      card.appendChild(vid); card.appendChild(title);
+      grid.appendChild(card);
+    });
+  }
+
+  // block right-click and context menus
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+  // blur videos on tab change (make background watcher less useful)
+  document.addEventListener('visibilitychange', ()=>{
+    document.querySelectorAll('video').forEach(v=>{
+      if(document.visibilityState !== 'visible') v.style.filter = 'blur(6px)';
+      else v.style.filter = 'none';
+    });
   });
 
-  loadVideos();
+  await load();
+})();
 </script>
 </body>
 </html>
