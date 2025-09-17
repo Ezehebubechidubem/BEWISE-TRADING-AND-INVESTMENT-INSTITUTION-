@@ -11,19 +11,81 @@
   .logo{height:36px}
   .wrap{padding:18px;max-width:1100px;margin:auto}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
-  .card{background:#062035;padding:12px;border-radius:12px}
+  .card{background:#062035;padding:12px;border-radius:12px;position:relative;overflow:hidden}
   video{width:100%;border-radius:8px;background:black}
+  .file-card{display:flex;flex-direction:column;gap:10px;align-items:flex-start;justify-content:center;padding:18px}
+  .file-icon{width:64px;height:64px;border-radius:8px;background:linear-gradient(90deg,#0b1220,#061427);display:flex;align-items:center;justify-content:center;font-weight:800;color:#cfefff}
+  .file-title{font-weight:700;margin-top:6px}
+  .file-actions{display:flex;gap:8px;margin-top:8px}
+  .btn{padding:8px 12px;border-radius:8px;border:0;cursor:pointer;font-weight:700}
+  .btn-download{background:linear-gradient(90deg,#4ade80,#16a34a);color:#04210b}
+  .btn-open{background:linear-gradient(90deg,#1e88ff,#0b63d6);color:#fff}
+  .note{opacity:0.85;font-size:0.95rem;margin-bottom:6px}
+  /* Modal */
+  .modal-backdrop{ position:fixed; inset:0; background:rgba(2,6,23,0.6); display:none; align-items:center; justify-content:center; z-index:9999; }
+  .modal-panel{ background:#0b1220; padding:18px; border-radius:10px; width:92%; max-width:520px; box-shadow:0 12px 40px rgba(0,0,0,0.6); color:#e6eef8 }
+  .modal-title{ font-weight:800; margin-bottom:8px; font-size:1.05rem }
+  .modal-body{ margin-bottom:12px; color:#cfefff; line-height:1.3 }
+  .modal-actions{ display:flex; gap:8px; justify-content:flex-end; }
+  .btn-secondary{ background:transparent; border:1px solid rgba(255,255,255,0.06); color:#cfefff; padding:8px 10px; border-radius:8px; cursor:pointer }
+  .btn-primary{ background:linear-gradient(90deg,#06b6d4,#0891b2); color:#042a2b; padding:8px 12px; border-radius:8px; font-weight:800; cursor:pointer }
 </style>
 </head>
 <body>
-<header><img src="  https://i.postimg.cc/x1cLbZhh/IMG-20250812-WA0070.jpg " class="logo"><div style="font-weight:700">Courses</div></header>
+<header><img src="/logo.png" class="logo" alt="logo"><div style="font-weight:700">Courses</div></header>
+
 <div class="wrap">
-  <p style="opacity:0.9">Watch course videos below. Downloading is blocked (best-effort).</p>
-  <div id="grid" class="grid"></div>
+  <p class="note">Watch course videos below. Downloading is blocked (best-effort). Files/resources will appear alongside videos when available.</p>
+  <div id="grid" class="grid" aria-live="polite"></div>
+</div>
+
+<!-- Modal -->
+<div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-hidden="true">
+  <div class="modal-panel" role="document" aria-live="polite" aria-modal="true">
+    <div class="modal-title" id="modalTitle">Title</div>
+    <div class="modal-body" id="modalBody">Message</div>
+    <div class="modal-actions" id="modalActions">
+      <button class="btn-secondary" id="modalCancel">Cancel</button>
+      <button class="btn-primary" id="modalOk">OK</button>
+    </div>
+  </div>
 </div>
 
 <script>
 (async function(){
+  // ---- Modal utilities (replaces alert()) ----
+  const backdrop = document.getElementById('modalBackdrop');
+  const titleEl = document.getElementById('modalTitle');
+  const bodyEl = document.getElementById('modalBody');
+  const okBtn = document.getElementById('modalOk');
+  const cancelBtn = document.getElementById('modalCancel');
+
+  function showModal(title, message, { showCancel=false, okText='OK', cancelText='Cancel', okClass='btn-primary' } = {}){
+    titleEl.innerText = title || '';
+    bodyEl.innerText = message || '';
+    okBtn.innerText = okText;
+    cancelBtn.innerText = cancelText;
+    cancelBtn.style.display = showCancel ? 'inline-block' : 'none';
+    backdrop.style.display = 'flex';
+    backdrop.setAttribute('aria-hidden', 'false');
+
+    return new Promise((resolve)=>{
+      function cleanup(){
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        backdrop.style.display = 'none';
+        backdrop.setAttribute('aria-hidden', 'true');
+      }
+      function onOk(){ cleanup(); resolve(true); }
+      function onCancel(){ cleanup(); resolve(false); }
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+    });
+  }
+  function showMessage(title, message){ return showModal(title, message, { showCancel:false, okText:'OK' }); }
+  function showConfirm(title, message){ return showModal(title, message, { showCancel:true, okText:'Yes', cancelText:'No' }); }
+
+  // ---- Fingerprint / session checks (unchanged logic) ----
   async function computeFP(){
     let uuid = localStorage.getItem('training_device_uuid');
     if(!uuid){ uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)); localStorage.setItem('training_device_uuid', uuid); }
@@ -32,25 +94,140 @@
     const hashBuf = await crypto.subtle.digest('SHA-256', enc);
     return Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
-  const myfp = await computeFP();
-  const allowed = localStorage.getItem('training_allowed_device');
-  if(allowed && allowed !== myfp){ alert('This installation is locked to another device.'); location.href='/'; return; }
-  const chk = await (await fetch('/api/check_session')).json();
-  if(!chk.logged_in){ location.href='/'; return; }
 
-  const res = await fetch('/api/videos');
-  const vids = await res.json();
+  const myfp = await computeFP();
+
+  // replace old alert with showMessage for device lock
+  const allowed = localStorage.getItem('training_allowed_device');
+  if(allowed && allowed !== myfp){
+    await showMessage('Device locked', 'This installation is locked to another device.');
+    location.href='/';
+    return;
+  }
+
+  // check session
+  try {
+    const chkRes = await fetch('/api/check_session');
+    const chk = await chkRes.json();
+    if(!chk.logged_in){
+      location.href='/';
+      return;
+    }
+  } catch(err){
+    console.error('Session check failed', err);
+    await showMessage('Error', 'Could not verify session. Redirecting to login.');
+    location.href='/';
+    return;
+  }
+
+  // ---- helper fetch wrappers ----
+  async function safeJsonFetch(url, opts){
+    try {
+      const r = await fetch(url, opts);
+      if(!r.ok){
+        // return {ok:false, status: r.status}
+        return { ok:false, status: r.status, body: null };
+      }
+      const j = await r.json();
+      return { ok:true, status: r.status, body: j };
+    } catch(e){
+      console.error('fetch error', url, e);
+      return { ok:false, status: 0, body: null, error: e };
+    }
+  }
+
+  // ---- get videos ----
+  const res = await safeJsonFetch('/api/videos');
+  const vids = (res.ok && Array.isArray(res.body)) ? res.body : [];
+
+  // ---- get files (try different endpoints) ----
+  // Prefer a public /api/files endpoint if available, otherwise try the admin list
+  let files = [];
+  const tryEndpoints = ['/api/files', '/api/admin/files'];
+  for(const ep of tryEndpoints){
+    const r = await safeJsonFetch(ep);
+    if(r.ok && Array.isArray(r.body)){
+      files = r.body;
+      break;
+    }
+    // if 403 or 401 or not ok, continue to next
+  }
+
+  // render combined content: videos first, then files (interleaving would be possible)
   const grid = document.getElementById('grid');
-  if(!Array.isArray(vids) || vids.length===0){ grid.innerHTML='<div style="opacity:0.8">No videos yet.</div>'; return; }
+  if((!Array.isArray(vids) || vids.length===0) && (!Array.isArray(files) || files.length===0)){
+    grid.innerHTML = '<div style="opacity:0.8">No videos or files yet.</div>';
+    return;
+  }
+
+  // create video cards
   vids.forEach(v=>{
     const card = document.createElement('div'); card.className='card';
-    const vid = document.createElement('video'); vid.controls=true; vid.setAttribute('controlsList','nodownload nofullscreen noremoteplayback'); vid.src = '/stream/'+v.id;
-    vid.onplay = async ()=>{ const j = await (await fetch('/api/check_session')).json(); if(!j.logged_in){ vid.pause(); alert('Please login'); location.href='/'; } };
+    const vid = document.createElement('video');
+    vid.controls = true;
+    vid.setAttribute('controlsList','nodownload nofullscreen noremoteplayback');
+    vid.src = '/stream/'+v.id;
+    // onplay check session -> replaced alert with modal+redirect
+    vid.onplay = async ()=>{ 
+      try {
+        const jres = await fetch('/api/check_session');
+        const j = await jres.json();
+        if(!j.logged_in){
+          vid.pause();
+          await showMessage('Login required', 'Please login to continue');
+          location.href='/';
+        }
+      } catch(e){
+        vid.pause();
+        await showMessage('Error', 'Session check failed');
+        location.href='/';
+      }
+    };
     const t = document.createElement('div'); t.style.marginTop='8px'; t.style.fontWeight='700'; t.innerText = v.title || 'Untitled';
     card.appendChild(vid); card.appendChild(t); grid.appendChild(card);
   });
+
+  // create file cards
+  files.forEach(f=>{
+    const card = document.createElement('div'); card.className='card file-card';
+    const top = document.createElement('div'); top.style.display='flex'; top.style.alignItems='center'; top.style.gap='12px';
+    const icon = document.createElement('div'); icon.className='file-icon'; icon.innerText = 'FILE';
+    const meta = document.createElement('div'); meta.style.flex='1';
+    const title = document.createElement('div'); title.className='file-title'; title.innerText = f.title || f.filename || 'Untitled';
+    const uploaded = document.createElement('div'); uploaded.style.opacity='0.8'; uploaded.style.fontSize='12px'; uploaded.innerText = f.uploaded_at?('Uploaded: '+ (new Date(f.uploaded_at).toLocaleString())) : '';
+    meta.appendChild(title); meta.appendChild(uploaded);
+    top.appendChild(icon); top.appendChild(meta);
+    card.appendChild(top);
+
+    const actions = document.createElement('div'); actions.className = 'file-actions';
+    // open/view button (if browser can)
+    const open = document.createElement('a');
+    open.className = 'btn btn-open';
+    open.innerText = 'Open';
+    // try to open via /download/file/<id> if available, fallback to /uploads filename path
+    const downloadUrl = '/download/file/' + encodeURIComponent(f.id);
+    open.href = downloadUrl;
+    open.target = '_blank';
+    open.rel = 'noopener noreferrer';
+    actions.appendChild(open);
+
+    const dl = document.createElement('a');
+    dl.className = 'btn btn-download';
+    dl.innerText = 'Download';
+    dl.href = downloadUrl;
+    dl.download = '';
+    dl.target = '_blank';
+    dl.rel = 'noopener noreferrer';
+    actions.appendChild(dl);
+
+    card.appendChild(actions);
+    grid.appendChild(card);
+  });
+
+  // disable context menu and soft protections (unchanged)
   document.addEventListener('contextmenu', e=>e.preventDefault());
   document.addEventListener('visibilitychange', ()=>{ document.querySelectorAll('video').forEach(v=> v.style.filter = document.visibilityState === 'visible' ? 'none' : 'blur(6px)'); });
+
 })();
 </script>
 </body>
