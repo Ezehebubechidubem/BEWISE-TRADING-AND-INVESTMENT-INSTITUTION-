@@ -35,23 +35,21 @@
 
 <script>
 (async function(){
-  // ---------- CONFIG: edit if you host backend elsewhere ----------
+  // ------------- CONFIG -------------
   const RENDER_HOST = 'bewise-trading-and-investment-institution.onrender.com';
   const RENDER_BASE = 'https://' + RENDER_HOST;
   const RENDER_API = RENDER_BASE + '/api';
 
-  // If page served from Render host use relative routes; otherwise use Render absolute URLs.
+  // If page served from Render host use relative /api; otherwise use Render absolute API.
   const API = (location.hostname === RENDER_HOST) ? '/api' : RENDER_API;
   const UI_BASE = (location.hostname === RENDER_HOST) ? '' : RENDER_BASE;
-  // ---------------------------------------------------------------
+  // ----------------------------------
 
-  // ---------- UI refs ----------
   const pinInput = document.getElementById('pin');
   const btn = document.getElementById('btn');
   const msg = document.getElementById('msg');
   const fpBox = document.getElementById('fpBox');
 
-  // ---------- fingerprint helper (stable) ----------
   async function computeFingerprint(){
     let uuid = localStorage.getItem('training_device_uuid');
     if(!uuid){
@@ -71,7 +69,6 @@
     return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
   }
 
-  // ---------- session check on load ----------
   async function checkSessionOnLoad(){
     try {
       const r = await fetch(API + '/check_session', { credentials: 'include' });
@@ -84,18 +81,16 @@
     }
   }
 
-  // compute fingerprint once and show it hidden
   const fp = await computeFingerprint();
   fpBox.textContent = fp;
 
-  // reveal fingerprint on long-press or ctrl+click for convenience
+  // reveal fingerprint on long-press or ctrl+click
   let holdTimer = null;
   msg.addEventListener('mousedown', ()=>{ holdTimer = setTimeout(()=> fpBox.style.display='block', 600); });
   msg.addEventListener('mouseup', ()=>{ clearTimeout(holdTimer); });
   msg.addEventListener('mouseleave', ()=>{ clearTimeout(holdTimer); });
   msg.addEventListener('click', (e)=>{ if(e.ctrlKey) fpBox.style.display = (fpBox.style.display==='block' ? 'none' : 'block'); });
 
-  // If there's an existing session redirect to correct UI
   const existing = await checkSessionOnLoad();
   if(existing && existing.logged_in){
     if(existing.is_admin){
@@ -107,17 +102,13 @@
     return;
   }
 
-  // ---------- helpers ----------
   function showMsg(text, isErr){
     msg.textContent = text;
     msg.style.color = isErr ? '#ffb4b4' : '';
   }
 
-  function validPin(v){
-    return /^\d{6}$/.test(v);
-  }
+  function validPin(v){ return /^\d{6}$/.test(v); }
 
-  // ---------- login handler ----------
   btn.addEventListener('click', login);
   pinInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') login(); });
 
@@ -157,7 +148,6 @@
         return;
       }
 
-      // Success — backend returns role
       const role = json.role || (pin === '891959' ? 'admin' : 'user');
 
       if(role === 'admin' || pin === '891959'){
@@ -166,14 +156,13 @@
         sessionStorage.removeItem('training_is_admin');
       }
 
-      try { localStorage.setItem('training_allowed_device', fp); } catch(e){ /* ignore */ }
+      try { localStorage.setItem('training_allowed_device', fp); } catch(e){}
 
       alert('Welcome — login successful.');
       setTimeout(()=> {
         alert('Warning: PINs are single-device. Do not share your PIN. If used on another device it will be revoked.');
       }, 200);
 
-      // Redirect to server routes (use UI_BASE so this works if page isn't served from Render)
       if(role === 'admin' || pin === '891959'){
         location.href = UI_BASE + '/admin';
       } else {
