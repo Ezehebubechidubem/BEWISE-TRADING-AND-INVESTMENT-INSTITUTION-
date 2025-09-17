@@ -524,6 +524,12 @@ def api_admin_delete_file():
         logger.exception("Failed to remove file %s: %s", path, exc)
         return jsonify({"success": True, "warning": "db_deleted_but_file_remove_failed", "message": str(exc)})
     return jsonify({"success": True})
+@app.route("/api/files")
+def api_files():
+    """List uploaded files available to all users."""
+    rows = File.query.order_by(File.uploaded_at.desc()).all()
+    data = [{"id": r.id, "title": r.title, "filename": r.filename, "uploaded_at": (r.uploaded_at.isoformat() if r.uploaded_at else None)} for r in rows]
+    return jsonify(data)
 
 # -------------- API: Payment ------------
 @app.route("/api/payment/proof", methods=["POST"])
