@@ -453,4 +453,42 @@
         body: fd
       });
       const j = await r.json();
+      uploadFileResult.innerText = 'Uploaded ✓';
+        fileTitle.value = '';
+        anyFile.value = '';
+        loadVideos();
+        await showMessage('Uploaded', 'File uploaded successfully (saved as video record)');
+      } else {
+        uploadFileResult.innerText = 'Upload failed: ' + (j.error || j.message || 'server');
+        console.error('upload_file response', j);
+        await showMessage('Error', 'Upload failed: ' + (j.error || j.message || 'server'));
+      }
+    } catch(e){
+      uploadFileResult.innerText = 'Network error';
+      console.error('upload_file error', e);
+      await showMessage('Network error', 'Network error while uploading file');
+    } finally { btnUploadFile.disabled = false; }
+  });
+
+  btnRefresh.addEventListener('click', ()=>{ loadPins(); loadVideos(); });
+
+  btnLogout.addEventListener('click', async ()=>{
+    const ok = await showConfirm('Logout admin', 'Logout admin?');
+    if(!ok) return;
+    try {
+      await apiFetch('/logout', { method: 'POST' });
+    } catch(e){ console.error('logout error', e); }
+    sessionStorage.removeItem('training_is_admin');
+    window.location.href = UI_BASE + '/';
+  });
+
+  // initial load
+  loadPins();
+  loadVideos();
+
+})();
+</script>
+</body>
+</html>
+
     
