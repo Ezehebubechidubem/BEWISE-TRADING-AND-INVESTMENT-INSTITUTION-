@@ -32,22 +32,29 @@
   .btn-secondary{ background:transparent; border:1px solid rgba(255,255,255,0.06); color:#cfefff; padding:8px 10px; border-radius:8px; cursor:pointer }
   .btn-primary{ background:var(--accent); color:#042a2b; padding:8px 12px; border-radius:8px; font-weight:800; cursor:pointer }
   .btn-danger{ background:var(--danger); color:white; padding:8px 12px; border-radius:8px; font-weight:800; cursor:pointer }
+
+  /* small action buttons */
+  .btn-small { padding:6px 8px; font-size:13px; border-radius:8px; }
+  .btn-muted { background:#6b7280; color:#fff; border:0; }
+
+  /* keep refresh & logout on same line */
+  .top-actions button { margin-left:8px; }
 </style>
 </head>
 <body>
 <header>
-  <img src="  https://i.postimg.cc/x1cLbZhh/IMG-20250812-WA0070.jpg " class="logo" alt="logo">
+  <img src="https://i.postimg.cc/x1cLbZhh/IMG-20250812-WA0070.jpg" class="logo" alt="logo">
   <div>
-    <div style="font-weight:700">BEWISE TRADING AND INVESTMENT INSTITUTION </div>
+    <div style="font-weight:700">BEWISE TRADING AND INVESTMENT INSTITUTION</div>
   </div>
 </header>
 
 <div class="container" id="app">
   <div style="display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px">
     <div class="hint">Admin access is session-protected (cookie). You must login from / first.</div>
-    <div>
+    <div class="top-actions">
       <button id="btnRefresh">Refresh</button>
-      <button id="btnLogout" style="margin-left:8px" class="danger">Logout</button>
+      <button id="btnLogout" class="danger">Logout</button>
     </div>
   </div>
 
@@ -133,6 +140,8 @@
   const RENDER_BASE = 'https://' + RENDER_HOST;
   const RENDER_API = RENDER_BASE + '/api';
   // ---------------------------------------------------------------------
+
+  // If served from Render host use relative /api; otherwise use absolute Render API
   const API = (location.hostname === RENDER_HOST) ? '/api' : RENDER_API;
   const UI_BASE = (location.hostname === RENDER_HOST) ? '' : RENDER_BASE;
 
@@ -194,7 +203,6 @@
   }
 
   function showMessage(title, message){
-    // simple info modal with only OK
     return showModal(title, message, { showCancel:false, okText:'OK', cancelText:'', okClass:'btn-primary' });
   }
   async function showConfirm(title, message){
@@ -223,6 +231,7 @@
   const fp = await computeFingerprint();
 
   async function apiFetch(path, opts = {}){
+    // path should start with '/admin/...' or '/videos' etc.
     const url = API + path;
     const finalOpts = Object.assign({ credentials: 'include' }, opts);
     try {
@@ -275,9 +284,10 @@
         tr.innerHTML = `<td>${p.id}</td><td>${p.pin}</td><td>${p.note||''}</td><td style="max-width:180px;word-break:break-word">${p.device_id||''}</td><td>${p.ip||''}</td><td>${p.revoked? 'YES':''}</td>`;
         const td = document.createElement('td');
 
-        // Revoke button (existing behavior)
+        // Revoke button
         if(!p.revoked){
           const btn = document.createElement('button');
+          btn.className = 'btn-small';
           btn.innerText = 'Revoke';
           btn.addEventListener('click', async ()=>{
             const ok = await showConfirm('Revoke PIN', 'Revoke PIN ' + p.pin + ' ?');
@@ -306,11 +316,10 @@
           td.appendChild(span);
         }
 
-        // Delete button (new) - calls backend endpoint /api/admin/delete_pin
+        // Delete button -> /api/admin/delete_pin
         const del = document.createElement('button');
+        del.className = 'btn-small btn-muted';
         del.style.marginLeft = '8px';
-        del.style.background = '#6b7280';
-        del.style.color = '#fff';
         del.innerText = 'Delete';
         del.addEventListener('click', async ()=>{
           const ok = await showConfirm('Delete PIN', 'Delete PIN record (this will remove it permanently) ?');
@@ -323,7 +332,6 @@
               body: JSON.stringify({ pin_id: p.id })
             });
             if(rr.status === 404){
-              const text = await rr.text();
               await showMessage('Not available', 'Delete endpoint not available on server. Backend must implement /api/admin/delete_pin.');
             } else {
               const jr = await rr.json();
@@ -354,7 +362,7 @@
   async function loadVideos(){
     videosArea.innerText = 'Loading videos...';
     try {
-      const r = await apiFetch('/videos');
+      const r = await apiFetch('/videos'); // backend: /api/videos
       const j = await r.json();
       if(!Array.isArray(j)){
         videosArea.innerHTML = '<div class="error">Failed to load videos</div>';
@@ -368,10 +376,10 @@
         tr.innerHTML = `<td>${v.id}</td><td>${v.title}</td><td>${v.uploaded_at||''}</td>`;
         const td = document.createElement('td');
 
-        // Delete button for video (new)
+        // Delete button for video -> /api/admin/delete_video
         const del = document.createElement('button');
+        del.className = 'btn-small btn-muted';
         del.innerText = 'Delete';
-        del.style.background = '#6b7280'; del.style.color = '#fff';
         del.addEventListener('click', async ()=>{
           const ok = await showConfirm('Delete video', 'Delete video "' + v.title + '" ?');
           if(!ok) return;
@@ -410,6 +418,7 @@
     }
   }
 
+  // Generate PIN
   btnGenerate.addEventListener('click', async ()=>{
     const note = (noteInput.value || '').slice(0,200);
     generateResult.innerText = 'Generating...';
@@ -438,57 +447,8 @@
     } finally { btnGenerate.disabled = false; }
   });
 
+  // Upload video -> /api/admin/upload_video
   btnUpload.addEventListener('click', async ()=>{
     const title = (videoTitle.value || '').trim();
     const file = videoFile.files[0];
-    if(!title || !file){ uploadResult.innerText = 'Provide title and file'; await showMessage('Missing fields','Provide title and file'); return; }
-    uploadResult.innerText = 'Uploading...';
-    btnUpload.disabled = true;
-    try {
-      const fd = new FormData();
-      fd.append('title', title);
-      fd.append('video', file);
-      const r = await apiFetch('/admin/upload_video', {
-        method: 'POST',
-        body: fd
-      });
-      const j = await r.json();
-      uploadFileResult.innerText = 'Uploaded ✓';
-        fileTitle.value = '';
-        anyFile.value = '';
-        loadVideos();
-        await showMessage('Uploaded', 'File uploaded successfully (saved as video record)');
-      } else {
-        uploadFileResult.innerText = 'Upload failed: ' + (j.error || j.message || 'server');
-        console.error('upload_file response', j);
-        await showMessage('Error', 'Upload failed: ' + (j.error || j.message || 'server'));
-      }
-    } catch(e){
-      uploadFileResult.innerText = 'Network error';
-      console.error('upload_file error', e);
-      await showMessage('Network error', 'Network error while uploading file');
-    } finally { btnUploadFile.disabled = false; }
-  });
-
-  btnRefresh.addEventListener('click', ()=>{ loadPins(); loadVideos(); });
-
-  btnLogout.addEventListener('click', async ()=>{
-    const ok = await showConfirm('Logout admin', 'Logout admin?');
-    if(!ok) return;
-    try {
-      await apiFetch('/logout', { method: 'POST' });
-    } catch(e){ console.error('logout error', e); }
-    sessionStorage.removeItem('training_is_admin');
-    window.location.href = UI_BASE + '/';
-  });
-
-  // initial load
-  loadPins();
-  loadVideos();
-
-})();
-</script>
-</body>
-</html>
-
-    
+    if(!title || !file){ uploadResult.innerText = 'Provide title and file'; await showMessage('Missing fields','Provide titl
