@@ -70,6 +70,14 @@ class Video(db.Model):
     filename = db.Column(db.String(1024))
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class File(db.Model):
+    """Generic non-video file uploads (documents, zips, images, etc)."""
+    __tablename__ = "files"
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(512))
+    filename = db.Column(db.String(1024))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 class Payment(db.Model):
     __tablename__ = "payments"
     id = db.Column(db.Integer, primary_key=True)
