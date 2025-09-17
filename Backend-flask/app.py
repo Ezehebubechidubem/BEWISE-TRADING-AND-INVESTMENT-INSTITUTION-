@@ -486,6 +486,44 @@ def api_admin_upload_file():
         except Exception:
             pass
         return jsonify({"success": False, "error": "upload_failed", "message": str(exc)}), 500
+@app.route("/api/admin/files")
+def api_admin_files():
+    """List uploaded non-video files (admin only)."""
+    if not admin_auth_ok(request):
+        return jsonify({"success": False, "error": "admin_auth_required"}), 403
+    rows = File.query.order_by(File.uploaded_at.desc()).all()
+    data = [{"id": r.id, "title": r.title, "filename": r.filename, "uploaded_at": (r.uploaded_at.isoformat() if r.uploaded_at else None)} for r in rows]
+    return jsonify(data)
+
+@app.route("/api/admin/delete_file", methods=["POST"])
+def api_admin_delete_file():
+    """Delete a file record and remove its file from uploads (admin only)."""
+    if not admin_auth_ok(request):
+        return jsonify({"success": False, "error": "admin_auth_required"}), 403
+    data = request.get_json() or {}
+    file_id = data.get("file_id")
+    if not file_id:
+        return jsonify({"success": False, "error": "missing_file_id"}), 400
+    frow = File.query.get(file_id)
+    if not frow:
+        return jsonify({"success": False, "error": "file_not_found"}), 404
+    filename = frow.filename
+    path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    try:
+        db.session.delete(frow)
+        db.session.commit()
+    except Exception as exc:
+        logger.exception("DB delete failed for file %s: %s", file_id, exc)
+        db.session.rollback()
+        return jsonify({"success": False, "error": "delete_failed", "message": str(exc)}), 500
+
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as exc:
+        logger.exception("Failed to remove file %s: %s", path, exc)
+        return jsonify({"success": True, "warning": "db_deleted_but_file_remove_failed", "message": str(exc)})
+    return jsonify({"success": True})
 
 # -------------- API: Payment ------------
 @app.route("/api/payment/proof", methods=["POST"])
