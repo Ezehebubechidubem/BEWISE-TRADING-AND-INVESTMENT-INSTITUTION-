@@ -394,6 +394,91 @@ def api_admin_revoke_pin():
     db.session.add(p); db.session.commit()
     return jsonify({"success": True})
 
+# ---------------- New Admin endpoints -----------------
+@app.route("/api/admin/delete_pin", methods=["POST"])
+def api_admin_delete_pin():
+    """Permanently delete a PIN record (admin only)."""
+    if not admin_auth_ok(request):
+        return jsonify({"success": False, "error": "admin_auth_required"}), 403
+    data = request.get_json() or {}
+    pin_id = data.get("pin_id")
+    if not pin_id:
+        return jsonify({"success": False, "error": "missing_pin_id"}), 400
+    p = Pin.query.get(pin_id)
+    if not p:
+        return jsonify({"success": False, "error": "pin_not_found"}), 404
+    try:
+        db.session.delete(p)
+        db.session.commit()
+        return jsonify({"success": True})
+    except Exception as exc:
+        logger.exception("Failed to delete pin %s: %s", pin_id, exc)
+        db.session.rollback()
+        return jsonify({"success": False, "error": "delete_failed", "message": str(exc)}), 500
+
+@app.route("/api/admin/delete_video", methods=["POST"])
+def api_admin_delete_video():
+    """Delete a video record and remove its file from uploads (admin only)."""
+    if not admin_auth_ok(request):
+        return jsonify({"success": False, "error": "admin_auth_required"}), 403
+    data = request.get_json() or {}
+    video_id = data.get("video_id")
+    if not video_id:
+        return jsonify({"success": False, "error": "missing_video_id"}), 400
+    v = Video.query.get(video_id)
+    if not v:
+        return jsonify({"success": False, "error": "video_not_found"}), 404
+
+    # Build safe path (filename stored in DB already, so use it)
+    filename = v.filename
+    path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    try:
+        # remove DB record first, then file
+        db.session.delete(v)
+        db.session.commit()
+    except Exception as exc:
+        logger.exception("DB delete failed for video %s: %s", video_id, exc)
+        db.session.rollback()
+        return jsonify({"success": False, "error": "delete_failed", "message": str(exc)}), 500
+
+    # Try to remove file (best-effort). If file missing, it's okay.
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as exc:
+        # Log but return success because DB record is removed.
+        logger.exception("Failed to remove video file %s: %s", path, exc)
+        return jsonify({"success": True, "warning": "db_deleted_but_file_remove_failed", "message": str(exc)})
+    return jsonify({"success": True})
+
+@app.route("/api/admin/upload_file", methods=["POST"])
+def api_admin_upload_file():
+    """Generic file upload (any file) — admin only. Saves to uploads/ and creates Video record."""
+    if not admin_auth_ok(request):
+        return jsonify({"success": False, "error": "admin_auth_required"}), 403
+    title = request.form.get("title", "").strip()
+    f = request.files.get("file")
+    if not f or not title:
+        return jsonify({"success": False, "error": "missing_title_or_file"}), 400
+    safe_name = secrets.token_hex(8) + "_" + secure_filename(f.filename)
+    path = os.path.join(app.config["UPLOAD_FOLDER"], safe_name)
+    try:
+        f.save(path)
+        v = Video(title=title, filename=safe_name, uploaded_at=now())
+        db.session.add(v); db.session.commit()
+        return jsonify({"success": True, "video_id": v.id})
+    except Exception as exc:
+        logger.exception("upload_file failed: %s", exc)
+        db.session.rollback()
+        # remove partial file if it exists
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+        return jsonify({"success": False, "error": "upload_failed", "message": str(exc)}), 500
+# ------------------------------------------------------
+
 # -------------- API: Payment ------------
 @app.route("/api/payment/proof", methods=["POST"])
 def api_payment_proof():
