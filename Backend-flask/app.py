@@ -461,7 +461,7 @@ def api_admin_delete_video():
 
 @app.route("/api/admin/upload_file", methods=["POST"])
 def api_admin_upload_file():
-    """Generic file upload (any file) — admin only. Saves to uploads/ and creates Video record."""
+    """Generic file upload (any file) — admin only. Saves to uploads/ and creates File record."""
     if not admin_auth_ok(request):
         return jsonify({"success": False, "error": "admin_auth_required"}), 403
     title = request.form.get("title", "").strip()
@@ -472,9 +472,10 @@ def api_admin_upload_file():
     path = os.path.join(app.config["UPLOAD_FOLDER"], safe_name)
     try:
         f.save(path)
-        v = Video(title=title, filename=safe_name, uploaded_at=now())
-        db.session.add(v); db.session.commit()
-        return jsonify({"success": True, "video_id": v.id})
+        file_row = File(title=title, filename=safe_name, uploaded_at=now())
+        db.session.add(file_row)
+        db.session.commit()
+        return jsonify({"success": True, "file_id": file_row.id})
     except Exception as exc:
         logger.exception("upload_file failed: %s", exc)
         db.session.rollback()
@@ -485,7 +486,6 @@ def api_admin_upload_file():
         except Exception:
             pass
         return jsonify({"success": False, "error": "upload_failed", "message": str(exc)}), 500
-# ------------------------------------------------------
 
 # -------------- API: Payment ------------
 @app.route("/api/payment/proof", methods=["POST"])
