@@ -35,10 +35,15 @@
 
 <script>
 (async function(){
-  // ---------- API selection ----------
-  // Use relative /api when page is served from same host; otherwise use the Render absolute API.
-  const RENDER_API = 'https://bewise-trading-and-investment-institution.onrender.com/api';
-  const API = (location.hostname === 'bewise-trading-and-investment-institution.onrender.com') ? '/api' : RENDER_API;
+  // ---------- CONFIG: edit if you host backend elsewhere ----------
+  const RENDER_HOST = 'bewise-trading-and-investment-institution.onrender.com';
+  const RENDER_BASE = 'https://' + RENDER_HOST;
+  const RENDER_API = RENDER_BASE + '/api';
+
+  // If page served from Render host use relative routes; otherwise use Render absolute URLs.
+  const API = (location.hostname === RENDER_HOST) ? '/api' : RENDER_API;
+  const UI_BASE = (location.hostname === RENDER_HOST) ? '' : RENDER_BASE;
+  // ---------------------------------------------------------------
 
   // ---------- UI refs ----------
   const pinInput = document.getElementById('pin');
@@ -48,7 +53,6 @@
 
   // ---------- fingerprint helper (stable) ----------
   async function computeFingerprint(){
-    // keep same method as admin and course pages
     let uuid = localStorage.getItem('training_device_uuid');
     if(!uuid){
       uuid = (crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)));
@@ -64,8 +68,7 @@
     ].join('||');
     const enc = new TextEncoder().encode(parts);
     const hashBuf = await crypto.subtle.digest('SHA-256', enc);
-    const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
-    return hex;
+    return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
   }
 
   // ---------- session check on load ----------
@@ -81,28 +84,28 @@
     }
   }
 
-  const existing = await checkSessionOnLoad();
-  if(existing && existing.logged_in){
-    // already logged in => redirect to the right page
-    if(existing.is_admin){
-      // ensure admin flag (helps admin.html)
-      sessionStorage.setItem('training_is_admin', '1');
-      location.replace('/admin');
-    } else {
-      location.replace('/dashboard');
-    }
-    return;
-  }
-
-  // show fingerprint (hidden by default) when user focuses pin field long-press or ctrl+click — helpful for device lock
+  // compute fingerprint once and show it hidden
   const fp = await computeFingerprint();
   fpBox.textContent = fp;
-  // reveal fingerprint on long press or Ctrl+click on msg
+
+  // reveal fingerprint on long-press or ctrl+click for convenience
   let holdTimer = null;
   msg.addEventListener('mousedown', ()=>{ holdTimer = setTimeout(()=> fpBox.style.display='block', 600); });
   msg.addEventListener('mouseup', ()=>{ clearTimeout(holdTimer); });
   msg.addEventListener('mouseleave', ()=>{ clearTimeout(holdTimer); });
   msg.addEventListener('click', (e)=>{ if(e.ctrlKey) fpBox.style.display = (fpBox.style.display==='block' ? 'none' : 'block'); });
+
+  // If there's an existing session redirect to correct UI
+  const existing = await checkSessionOnLoad();
+  if(existing && existing.logged_in){
+    if(existing.is_admin){
+      sessionStorage.setItem('training_is_admin', '1');
+      location.replace(UI_BASE + '/admin');
+    } else {
+      location.replace(UI_BASE + '/dashboard');
+    }
+    return;
+  }
 
   // ---------- helpers ----------
   function showMsg(text, isErr){
@@ -110,7 +113,6 @@
     msg.style.color = isErr ? '#ffb4b4' : '';
   }
 
-  // validate PIN input
   function validPin(v){
     return /^\d{6}$/.test(v);
   }
@@ -139,7 +141,6 @@
       try { json = JSON.parse(text); } catch(e){ json = { success:false, error:'invalid_response', raw:text }; }
 
       if(!res.ok || !json.success){
-        // handle specific server errors
         const err = json.error || json.message || 'Login failed';
         if(json.error === 'revoked_due_to_multiple_devices'){
           showMsg('PIN revoked — it was used on another device.', true);
@@ -156,32 +157,27 @@
         return;
       }
 
-      // Successful login
-      // JSON contains role (admin/user)
+      // Success — backend returns role
       const role = json.role || (pin === '891959' ? 'admin' : 'user');
 
-      // set admin flag locally if admin
       if(role === 'admin' || pin === '891959'){
         sessionStorage.setItem('training_is_admin', '1');
       } else {
         sessionStorage.removeItem('training_is_admin');
       }
 
-      // Save allowed device locally for UX (server is authoritative)
       try { localStorage.setItem('training_allowed_device', fp); } catch(e){ /* ignore */ }
 
-      // Welcome + warning
       alert('Welcome — login successful.');
-      // Warning popup after short delay to ensure cookie set
       setTimeout(()=> {
         alert('Warning: PINs are single-device. Do not share your PIN. If used on another device it will be revoked.');
       }, 200);
 
-      // redirect to appropriate page
+      // Redirect to server routes (use UI_BASE so this works if page isn't served from Render)
       if(role === 'admin' || pin === '891959'){
-        location.href = 'admin.html';
+        location.href = UI_BASE + '/admin';
       } else {
-        location.href = 'dashboard.html';
+        location.href = UI_BASE + '/dashboard';
       }
     } catch(err){
       console.error('login error', err);
