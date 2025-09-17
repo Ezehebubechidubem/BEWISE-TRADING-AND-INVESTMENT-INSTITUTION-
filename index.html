@@ -1,74 +1,196 @@
-<!-- authentication.html -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Authentication — Crypto Training</title>
+<title>Login — Crypto Training</title>
 <link rel="icon" href="/logo.png">
 <style>
-  body{font-family:system-ui; margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#071024; color:#e6eef8}
-  .card{width:92vw; max-width:420px; padding:18px; border-radius:12px; background:linear-gradient(180deg,#071a2b,#041324)}
-  .logo{display:block; width:140px; margin:0 auto 10px}
-  .pin{width:100%; padding:12px; font-size:20px; text-align:center; border-radius:8px; background:transparent; border:1px solid rgba(255,255,255,0.06)}
-  button{width:100%; padding:12px; margin-top:12px; border-radius:8px; border:0; background:#06b6d4; color:#042a2b; font-weight:700}
-  .msg{margin-top:10px; text-align:center}
+  :root{ --bg:#071024; --card:#062035; --accent:#06b6d4; --danger:#ef4444; --text:#e6eef8; }
+  body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(180deg,#031025,#071024); color:var(--text); font-family:system-ui,Segoe UI,Roboto,Arial; }
+  .card{ width:92vw; max-width:420px; background:linear-gradient(180deg,#071a2b,#041324); border-radius:12px; padding:20px; box-shadow:0 8px 30px rgba(2,6,23,0.6); }
+  .logo{ display:block; margin:4px auto 12px; width:120px; height:auto }
+  h1{ text-align:center; margin:4px 0 8px; font-size:20px; }
+  .pin{ width:100%; padding:12px 14px; font-size:20px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:transparent; color:var(--text); text-align:center; letter-spacing:6px }
+  button{ width:100%; margin-top:12px; padding:12px; border-radius:10px; border:0; background:var(--accent); color:#042a2b; font-weight:800; cursor:pointer; font-size:16px }
+  .msg{ margin-top:12px; text-align:center; font-size:14px; color:rgba(230,238,248,0.9) }
+  .small{ margin-top:8px; font-size:12px; opacity:0.85; text-align:center }
+  a.link{ color:#9be7ff; text-decoration:none }
+  .fp { font-family:monospace; word-break:break-all; font-size:11px; background:#02121a; padding:8px; border-radius:8px; margin-top:10px; display:none }
 </style>
 </head>
 <body>
-  <div class="card">
-    <img src="/logo.png" class="logo" alt="logo">
-    <h2 style="text-align:center">Enter 6-digit PIN</h2>
-    <input id="pin" class="pin" maxlength="6" inputmode="numeric" placeholder="●●●●●●">
+  <div class="card" role="main" aria-labelledby="title">
+    <img src="/logo.png" alt="logo" class="logo" onerror="this.style.display='none'">
+    <h1 id="title">Enter 6-digit PIN</h1>
+
+    <input id="pin" class="pin" maxlength="6" inputmode="numeric" pattern="\d{6}" placeholder="●●●●●●" autocomplete="one-time-code" aria-label="6-digit PIN">
+
     <button id="btn">Login</button>
-    <div class="msg" id="msg"></div>
-    <p style="text-align:center; font-size:13px; margin-top:8px">If the PIN is used on another device it will be revoked automatically.</p>
-    <p style="text-align:center"><a href="/payment" style="color:#9be7ff">Buy course / Payment</a></p>
+    <div class="msg" id="msg">PIN is single-device. If used elsewhere it will be revoked.</div>
+    <div class="small">Don't have a PIN? <a class="link" href="/payment">Buy course / Payment</a></div>
+
+    <div class="fp" id="fpBox" title="Device fingerprint (for server lock)"></div>
   </div>
 
 <script>
 (async function(){
-  // compute stable fingerprint (same method across pages)
-  async function computeFP(){
+  // ---------- API selection ----------
+  // Use relative /api when page is served from same host; otherwise use the Render absolute API.
+  const RENDER_API = 'https://bewise-trading-and-investment-institution.onrender.com/api';
+  const API = (location.hostname === 'bewise-trading-and-investment-institution.onrender.com') ? '/api' : RENDER_API;
+
+  // ---------- UI refs ----------
+  const pinInput = document.getElementById('pin');
+  const btn = document.getElementById('btn');
+  const msg = document.getElementById('msg');
+  const fpBox = document.getElementById('fpBox');
+
+  // ---------- fingerprint helper (stable) ----------
+  async function computeFingerprint(){
+    // keep same method as admin and course pages
     let uuid = localStorage.getItem('training_device_uuid');
-    if(!uuid){ uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)); localStorage.setItem('training_device_uuid', uuid); }
-    const data = [navigator.userAgent || '', navigator.platform || '', (navigator.languages || []).join(','), screen.width+'x'+screen.height+'x'+screen.colorDepth, Intl.DateTimeFormat().resolvedOptions().timeZone || '', uuid].join('||');
-    const enc = new TextEncoder().encode(data);
+    if(!uuid){
+      uuid = (crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)));
+      localStorage.setItem('training_device_uuid', uuid);
+    }
+    const parts = [
+      navigator.userAgent || '',
+      navigator.platform || '',
+      (navigator.languages || []).join(','),
+      screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
+      Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      uuid
+    ].join('||');
+    const enc = new TextEncoder().encode(parts);
     const hashBuf = await crypto.subtle.digest('SHA-256', enc);
-    return Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    return hex;
   }
 
-  const fp = await computeFP();
-  const msg = document.getElementById('msg');
-  document.getElementById('btn').addEventListener('click', async ()=>{
-    const pin = (document.getElementById('pin').value || '').trim();
-    if(!/^\d{6}$/.test(pin)){ msg.innerText = 'Enter a valid 6-digit PIN'; return; }
+  // ---------- session check on load ----------
+  async function checkSessionOnLoad(){
     try {
-      msg.innerText = 'Logging in...';
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ pin: pin, device_id: fp })
-      });
-      const j = await res.json();
-      if(res.ok && j.success){
-        alert('Welcome! Logged in.');
-        setTimeout(()=>alert('Warning: PIN works on a single device. Do not share it.'), 200);
-        if(pin === '891959'){
-          sessionStorage.setItem('training_is_admin', '1');
-          localStorage.setItem('training_allowed_device', fp); // client-side lock for convenience
-          location.href = '/admin';
-        } else {
-          location.href = '/dashboard';
-        }
-      } else {
-        msg.innerText = j.message || j.error || 'Login failed';
-      }
+      const r = await fetch(API + '/check_session', { credentials: 'include' });
+      if(!r.ok) return null;
+      const j = await r.json();
+      return j;
     } catch(e){
-      console.error(e);
-      msg.innerText = 'Network error';
+      console.warn('check_session failed', e);
+      return null;
     }
-  });
+  }
+
+  const existing = await checkSessionOnLoad();
+  if(existing && existing.logged_in){
+    // already logged in => redirect to the right page
+    if(existing.is_admin){
+      // ensure admin flag (helps admin.html)
+      sessionStorage.setItem('training_is_admin', '1');
+      location.replace('/admin');
+    } else {
+      location.replace('/dashboard');
+    }
+    return;
+  }
+
+  // show fingerprint (hidden by default) when user focuses pin field long-press or ctrl+click — helpful for device lock
+  const fp = await computeFingerprint();
+  fpBox.textContent = fp;
+  // reveal fingerprint on long press or Ctrl+click on msg
+  let holdTimer = null;
+  msg.addEventListener('mousedown', ()=>{ holdTimer = setTimeout(()=> fpBox.style.display='block', 600); });
+  msg.addEventListener('mouseup', ()=>{ clearTimeout(holdTimer); });
+  msg.addEventListener('mouseleave', ()=>{ clearTimeout(holdTimer); });
+  msg.addEventListener('click', (e)=>{ if(e.ctrlKey) fpBox.style.display = (fpBox.style.display==='block' ? 'none' : 'block'); });
+
+  // ---------- helpers ----------
+  function showMsg(text, isErr){
+    msg.textContent = text;
+    msg.style.color = isErr ? '#ffb4b4' : '';
+  }
+
+  // validate PIN input
+  function validPin(v){
+    return /^\d{6}$/.test(v);
+  }
+
+  // ---------- login handler ----------
+  btn.addEventListener('click', login);
+  pinInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') login(); });
+
+  async function login(){
+    const pin = (pinInput.value || '').trim();
+    if(!validPin(pin)){ showMsg('Enter a valid 6-digit PIN', true); return; }
+    showMsg('Logging in...');
+    btn.disabled = true;
+
+    try {
+      const payload = { pin: pin, device_id: fp };
+      const res = await fetch(API + '/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include'
+      });
+
+      const text = await res.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch(e){ json = { success:false, error:'invalid_response', raw:text }; }
+
+      if(!res.ok || !json.success){
+        // handle specific server errors
+        const err = json.error || json.message || 'Login failed';
+        if(json.error === 'revoked_due_to_multiple_devices'){
+          showMsg('PIN revoked — it was used on another device.', true);
+        } else if(json.error === 'pin_revoked'){
+          showMsg('This PIN has been revoked.', true);
+        } else if(json.error === 'pin_not_found'){
+          showMsg('PIN not found. Buy access or contact admin.', true);
+        } else if(json.error === 'device_not_allowed'){
+          showMsg(json.message || 'Device not allowed', true);
+        } else {
+          showMsg(err, true);
+        }
+        btn.disabled = false;
+        return;
+      }
+
+      // Successful login
+      // JSON contains role (admin/user)
+      const role = json.role || (pin === '891959' ? 'admin' : 'user');
+
+      // set admin flag locally if admin
+      if(role === 'admin' || pin === '891959'){
+        sessionStorage.setItem('training_is_admin', '1');
+      } else {
+        sessionStorage.removeItem('training_is_admin');
+      }
+
+      // Save allowed device locally for UX (server is authoritative)
+      try { localStorage.setItem('training_allowed_device', fp); } catch(e){ /* ignore */ }
+
+      // Welcome + warning
+      alert('Welcome — login successful.');
+      // Warning popup after short delay to ensure cookie set
+      setTimeout(()=> {
+        alert('Warning: PINs are single-device. Do not share your PIN. If used on another device it will be revoked.');
+      }, 200);
+
+      // redirect to appropriate page
+      if(role === 'admin' || pin === '891959'){
+        location.href = '/admin';
+      } else {
+        location.href = '/dashboard';
+      }
+    } catch(err){
+      console.error('login error', err);
+      showMsg('Network error — try again', true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
 })();
 </script>
 </body>
