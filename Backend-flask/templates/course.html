@@ -1,4 +1,4 @@
-<!-- course.html -->
+<!-- course.html (updated: removed files UI & logic; added top-right button) -->
 <!doctype html>
 <html>
 <head>
@@ -7,30 +7,36 @@
 <link rel="icon" href="/logo.png">
 <style>
   body{font-family:system-ui;margin:0;background:linear-gradient(180deg,#031025,#071024);color:#e6eef8}
-  header{display:flex;align-items:center;gap:12px;padding:12px;background:linear-gradient(90deg,#06203a,#08304d)}
+  header{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:12px;
+    background:linear-gradient(90deg,#06203a,#08304d);
+  }
+  .brand{ display:flex; align-items:center; gap:12px; }
   .logo{height:36px}
   .wrap{padding:18px;max-width:1100px;margin:auto}
   .intro{opacity:0.9;margin-bottom:14px}
-  /* toggle */
-  .switch-wrap{display:flex;gap:12px;justify-content:center;margin-bottom:18px}
-  .switch-btn{
-    padding:12px 18px;border-radius:12px;border:0;cursor:pointer;font-weight:800;font-size:1rem;
-    background:linear-gradient(90deg,#0b1220,#061427); color:#cfefff; box-shadow:0 8px 20px rgba(0,0,0,0.45);
-    transition:transform .12s, box-shadow .12s;
-  }
-  .switch-btn.active{ background:linear-gradient(90deg,#06b6d4,#0891b2); color:#042a2b; transform:translateY(-3px); box-shadow:0 16px 30px rgba(0,0,0,0.5); }
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
   .card{background:#062035;padding:12px;border-radius:12px;position:relative;overflow:hidden}
   video{width:100%;border-radius:8px;background:black}
-  /* file card */
-  .file-card{display:flex;flex-direction:column;gap:10px;align-items:flex-start;justify-content:center;padding:18px}
-  .file-preview{width:100%;border-radius:8px;background:#04080b;display:flex;align-items:center;justify-content:center;min-height:140px;color:#cfefff;overflow:hidden}
-  .file-meta{font-weight:700;margin-top:8px}
-  .file-actions{display:flex;gap:8px;margin-top:8px}
-  .btn{padding:8px 12px;border-radius:8px;border:0;cursor:pointer;font-weight:700}
-  .btn-download{background:linear-gradient(90deg,#4ade80,#16a34a);color:#04210b}
-  .btn-open{background:linear-gradient(90deg,#1e88ff,#0b63d6);color:#fff}
-  .note{opacity:0.85;font-size:0.95rem;margin-bottom:6px}
+
+  /* top-right button styling */
+  .header-actions{ margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .top-btn{
+    padding:8px 12px;
+    border-radius:10px;
+    border:0;
+    cursor:pointer;
+    font-weight:800;
+    font-size:0.95rem;
+    background:linear-gradient(90deg,#06b6d4,#0891b2);
+    color:#042a2b;
+    box-shadow:0 8px 20px rgba(0,0,0,0.35);
+  }
+  .top-btn.secondary{ background:linear-gradient(90deg,#4ade80,#16a34a); color:#04210b; }
+
   /* Modal */
   .modal-backdrop{ position:fixed; inset:0; background:rgba(2,6,23,0.6); display:none; align-items:center; justify-content:center; z-index:9999; }
   .modal-panel{ background:#0b1220; padding:18px; border-radius:10px; width:92%; max-width:520px; box-shadow:0 12px 40px rgba(0,0,0,0.6); color:#e6eef8 }
@@ -39,25 +45,34 @@
   .modal-actions{ display:flex; gap:8px; justify-content:flex-end; }
   .btn-secondary{ background:transparent; border:1px solid rgba(255,255,255,0.06); color:#cfefff; padding:8px 10px; border-radius:8px; cursor:pointer }
   .btn-primary{ background:linear-gradient(90deg,#06b6d4,#0891b2); color:#042a2b; padding:8px 12px; border-radius:8px; font-weight:800; cursor:pointer }
+
   @media (max-width:520px){
-    .switch-btn{ width:48%; font-size:0.95rem; padding:10px; }
+    .top-btn{ padding:8px 10px; font-size:0.9rem; }
   }
 </style>
 </head>
 <body>
-<header><img src="/logo.png" class="logo" alt="logo"><div style="font-weight:700">Courses</div></header>
-<div class="wrap">
-  <p class="intro">Watch course videos below. Downloading is blocked (best-effort). Use the switch to view Videos or Files (images, PDFs, resources).</p>
-
-  <div class="switch-wrap" role="tablist" aria-label="Choose content">
-    <button id="btnVideos" class="switch-btn active" role="tab" aria-selected="true">Videos</button>
-    <button id="btnFiles" class="switch-btn" role="tab" aria-selected="false">Files</button>
+<header>
+  <div class="brand">
+    <img src="/logo.png" class="logo" alt="logo">
+    <div style="font-weight:700">Courses</div>
   </div>
+
+  <!-- Top-right button requested -->
+  <div class="header-actions">
+    <!-- This button is a simple top-right action. It does NOT load files nor include file UI.
+         Adjust href or click behavior on the backend availability if you want it to link elsewhere. -->
+    <button id="topFilesBtn" class="top-btn" aria-label="Files">Files</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <p class="intro">Watch course videos below. Downloading is blocked (best-effort).</p>
 
   <div id="grid" class="grid" aria-live="polite"></div>
 </div>
 
-<!-- Modal -->
+<!-- Modal (used instead of alerts) -->
 <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-hidden="true">
   <div class="modal-panel" role="document" aria-live="polite" aria-modal="true">
     <div class="modal-title" id="modalTitle">Title</div>
@@ -96,7 +111,7 @@
   const showMessage = (t,m) => showModal(t,m,{showCancel:false,okText:'OK'});
   const showConfirm = (t,m) => showModal(t,m,{showCancel:true,okText:'Yes',cancelText:'No'});
 
-  // fingerprint & session checks (same logic)
+  // compute fingerprint (unchanged)
   async function computeFP(){
     let uuid = localStorage.getItem('training_device_uuid');
     if(!uuid){ uuid = crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)); localStorage.setItem('training_device_uuid', uuid); }
@@ -105,6 +120,7 @@
     const hashBuf = await crypto.subtle.digest('SHA-256', enc);
     return Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
+
   const fp = await computeFP();
   const allowed = localStorage.getItem('training_allowed_device');
   if(allowed && allowed !== fp){
@@ -112,7 +128,7 @@
     location.href='/'; return;
   }
 
-  // check session
+  // session check (unchanged)
   try{
     const chk = await (await fetch('/api/check_session')).json();
     if(!chk.logged_in){ location.href='/'; return; }
@@ -121,39 +137,21 @@
     await showMessage('Error','Unable to verify session. Redirecting to login.'); location.href='/'; return;
   }
 
-  // fetch helpers
+  // helper to fetch JSON safely
   async function safeJson(url, opts){ try { const r = await fetch(url, opts); if(!r.ok){ return {ok:false,status:r.status}; } const j = await r.json(); return {ok:true,body:j}; } catch(e){ return {ok:false,error:e}; } }
 
   // UI refs
-  const btnVideos = document.getElementById('btnVideos');
-  const btnFiles = document.getElementById('btnFiles');
   const grid = document.getElementById('grid');
+  const topFilesBtn = document.getElementById('topFilesBtn');
 
-  // state
-  let videos = [];
-  let files = [];
-
-  // loaders
+  // load & render videos only
   async function loadVideos(){
     const res = await safeJson('/api/videos');
-    if(res.ok && Array.isArray(res.body)) videos = res.body; else videos = [];
-  }
-  async function loadFiles(){
-    // MATCH BACKEND: use the admin files endpoint you provided
-    const r = await safeJson('/api/admin/files');
-    if(r.ok && Array.isArray(r.body)){
-      files = r.body;
-      return;
-    }
-    // if access denied or error, set files empty and show message
-    files = [];
-    if(r.status === 401 || r.status === 403){
-      await showMessage('Files unavailable', 'Files listing is restricted or unauthorized on the server.');
-    }
+    if(res.ok && Array.isArray(res.body)) return res.body;
+    return [];
   }
 
-  // renderers
-  function renderVideos(){
+  function renderVideos(videos){
     grid.innerHTML = '';
     if(!Array.isArray(videos) || videos.length===0){
       grid.innerHTML = '<div style="opacity:0.8">No videos yet.</div>'; return;
@@ -167,65 +165,18 @@
     });
   }
 
-  function extFromFilename(name){
-    if(!name) return '';
-    const m = name.split('.'); return (m.length>1?m.pop().toLowerCase():'');
-  }
-
-  function renderFiles(){
-    grid.innerHTML = '';
-    if(!Array.isArray(files) || files.length===0){
-      grid.innerHTML = '<div style="opacity:0.8">No files yet.</div>'; return;
-    }
-    files.forEach(f=>{
-      const card = document.createElement('div'); card.className='card file-card';
-      const preview = document.createElement('div'); preview.className='file-preview';
-      const filename = f.filename || '';
-      const title = f.title || filename || 'Untitled';
-      const ext = extFromFilename(filename);
-      // image inline
-      if(['png','jpg','jpeg','gif','webp','bmp','svg'].includes(ext)){
-        const img = document.createElement('img'); img.style.maxWidth='100%'; img.style.height='auto'; img.style.borderRadius='8px';
-        img.src = '/download/file/' + encodeURIComponent(f.id);
-        img.alt = title;
-        preview.appendChild(img);
-      } else if(ext === 'pdf'){
-        // embed pdf preview (iframe)
-        const ifr = document.createElement('iframe'); ifr.src = '/download/file/' + encodeURIComponent(f.id); ifr.style.width='100%'; ifr.style.height='260px'; ifr.style.border='0'; preview.appendChild(ifr);
-      } else {
-        // generic icon + filename
-        const txt = document.createElement('div'); txt.innerText = ext ? ext.toUpperCase() : 'FILE'; txt.style.fontWeight='800'; preview.appendChild(txt);
-      }
-      const meta = document.createElement('div'); meta.className='file-meta'; meta.innerText = title + (f.uploaded_at?(' — ' + (new Date(f.uploaded_at)).toLocaleString()):'');
-      const actions = document.createElement('div'); actions.className='file-actions';
-      const open = document.createElement('a'); open.className='btn btn-open'; open.innerText='Open'; open.href = '/download/file/' + encodeURIComponent(f.id); open.target='_blank'; open.rel='noopener noreferrer';
-      const dl = document.createElement('a'); dl.className='btn btn-download'; dl.innerText='Download'; dl.href = '/download/file/' + encodeURIComponent(f.id); dl.download = ''; dl.target='_blank'; dl.rel='noopener noreferrer';
-      actions.appendChild(open); actions.appendChild(dl);
-      card.appendChild(preview); card.appendChild(meta); card.appendChild(actions); grid.appendChild(card);
-    });
-  }
-
   // initial load
-  await loadVideos();
-  await loadFiles();
-  renderVideos();
+  const videos = await loadVideos();
+  renderVideos(videos);
 
-  // switch handlers
-  function setActive(isVideos){
-    if(isVideos){
-      btnVideos.classList.add('active'); btnFiles.classList.remove('active');
-      btnVideos.setAttribute('aria-selected','true'); btnFiles.setAttribute('aria-selected','false');
-      renderVideos();
-    } else {
-      btnFiles.classList.add('active'); btnVideos.classList.remove('active');
-      btnFiles.setAttribute('aria-selected','true'); btnVideos.setAttribute('aria-selected','false');
-      renderFiles();
-    }
-  }
-  btnVideos.addEventListener('click', ()=> setActive(true));
-  btnFiles.addEventListener('click', ()=> setActive(false));
+  // top-right button behavior: minimal, does NOT load files here.
+  // If you want it to redirect to a dedicated files page, change location.href accordingly.
+  topFilesBtn.addEventListener('click', async ()=>{
+    // simple informational popup — no file listing logic here (per your instruction)
+    await showMessage('Files','Files are managed separately. Use the Admin panel or visit /files if available on your server.');
+  });
 
-  // protections & polish
+  // protections & polish (unchanged)
   document.addEventListener('contextmenu', e=>e.preventDefault());
   document.addEventListener('visibilitychange', ()=>{ document.querySelectorAll('video').forEach(v=> v.style.filter = document.visibilityState === 'visible' ? 'none' : 'blur(6px)'); });
 
