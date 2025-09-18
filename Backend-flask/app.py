@@ -250,6 +250,10 @@ def payment_html():
 @app.route("/files", methods=["GET"])
 def payment_page():
     return safe_render("files")
+@app.route("/course.html", methods=["GET"])
+def course_html():
+    return safe_render("course")
+
 # Serve logo or fallback svg
 @app.route("/logo.png")
 def logo():
