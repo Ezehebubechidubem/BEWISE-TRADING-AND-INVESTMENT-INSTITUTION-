@@ -247,6 +247,9 @@ def payment_page():
 def payment_html():
     return safe_render("payment")
 
+@app.route("/files", methods=["GET"])
+def payment_page():
+    return safe_render("files")
 # Serve logo or fallback svg
 @app.route("/logo.png")
 def logo():
