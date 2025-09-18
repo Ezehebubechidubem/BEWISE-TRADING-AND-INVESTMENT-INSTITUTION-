@@ -248,11 +248,11 @@ def payment_html():
     return safe_render("payment")
 
 @app.route("/files", methods=["GET"])
-def payment_page():
+def files_page():
     return safe_render("files")
-@app.route("/course.html", methods=["GET"])
-def course_html():
-    return safe_render("course")
+@app.route("/files.html", methods=["GET"])
+def files_html():
+    return safe_render("files")
 
 # Serve logo or fallback svg
 @app.route("/logo.png")
