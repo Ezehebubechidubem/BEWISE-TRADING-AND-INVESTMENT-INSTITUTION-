@@ -102,7 +102,35 @@
   const showMessage = (t,m) => showModal(t,m,{showCancel:false,okText:'OK'});
   const showConfirm = (t,m) => showModal(t,m,{showCancel:true,okText:'Yes',cancelText:'No'});
 
-  async function computeFingerprint(){  
+  // non-blocking status modal controls (for waiting while backend wakes)
+  function showStatus(title, message, { showCancel=false, cancelHandler=null } = {}){
+    modalTitle.innerText = title || '';
+    modalBody.innerText = message || '';
+    modalOk.style.display = 'none'; // hide OK for status modal
+    modalCancel.style.display = showCancel ? 'inline-block' : 'none';
+    backdrop.style.display = 'flex';
+    backdrop.setAttribute('aria-hidden','false');
+    // attach temporary cancel handler if provided
+    if(showCancel && typeof cancelHandler === 'function'){
+      modalCancel.addEventListener('click', cancelHandler);
+    }
+    return {
+      update(msgText){
+        modalBody.innerText = msgText;
+      },
+      close(){
+        // remove any cancel listeners (best-effort)
+        modalCancel.replaceWith(modalCancel.cloneNode(true));
+        // restore nodes
+        const newCancel = document.getElementById('modalCancel');
+        modalOk.style.display = ''; // show OK back to default state
+        backdrop.style.display = 'none';
+        backdrop.setAttribute('aria-hidden','true');
+      }
+    };
+  }
+
+  function computeFingerprint(){  
     let uuid = localStorage.getItem('training_device_uuid');  
     if(!uuid){  
       uuid = (crypto.randomUUID ? crypto.randomUUID() : ('u-'+Math.random().toString(36).slice(2)));  
@@ -117,21 +145,64 @@
       uuid  
     ].join('||');  
     const enc = new TextEncoder().encode(parts);  
-    const hashBuf = await crypto.subtle.digest('SHA-256', enc);  
-    return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');  
+    return crypto.subtle.digest('SHA-256', enc).then(hashBuf => {
+      return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    });
   }  
 
-  async function checkSessionOnLoad(){  
-    try {  
-      const r = await fetch(API + '/check_session', { credentials: 'include' });  
-      if(!r.ok) return null;  
-      const j = await r.json();  
-      return j;  
-    } catch(e){  
-      console.warn('check_session failed', e);  
-      return null;  
-    }  
-  }  
+  // Enhanced checkSessionOnLoad that waits/polls if server is asleep / Render interstitial HTML appears.
+  async function checkSessionOnLoad(){
+    const maxAttempts = 120; // upper limit (e.g., ~4 minutes with 2s backoff), adjustable if desired
+    let attempt = 0;
+    let delay = 1000; // start 1s
+    let statusHandle = null;
+    let canceled = false;
+
+    // cancel handler for status modal
+    function onCancelWait(){
+      canceled = true;
+      if(statusHandle) statusHandle.close();
+    }
+
+    while(attempt < maxAttempts && !canceled){
+      attempt++;
+      try {
+        const res = await fetch(API + '/check_session', { credentials: 'include' });
+        // If we got an HTTP response, try to parse JSON. If it is JSON -> return it.
+        const txt = await res.text();
+        try {
+          const j = JSON.parse(txt);
+          // got JSON — close status if visible and return
+          if(statusHandle) statusHandle.close();
+          return j;
+        } catch (parseErr){
+          // Not JSON (likely HTML interstitial or Render verification page). Treat as server not ready.
+          // Show or update status modal.
+          if(!statusHandle){
+            statusHandle = showStatus('Waking server', 'Backend appears to be sleeping/returning HTML. Waiting for backend to become available... (attempt ' + attempt + ')', { showCancel: true, cancelHandler: onCancelWait });
+          } else {
+            statusHandle.update('Backend appears to be sleeping/returning HTML. Waiting... (attempt ' + attempt + ')');
+          }
+          // fallthrough to wait-and-retry
+        }
+      } catch (err){
+        // Network-level error (server down / DNS / CORS blocked). Show status and retry.
+        if(!statusHandle){
+          statusHandle = showStatus('Connecting', 'Unable to reach backend. Waiting for it to wake up... (attempt ' + attempt + ')', { showCancel: true, cancelHandler: onCancelWait });
+        } else {
+          statusHandle.update('Unable to reach backend. Waiting... (attempt ' + attempt + ')');
+        }
+      }
+
+      // exponential backoff with cap
+      await new Promise(r => setTimeout(r, delay));
+      delay = Math.min(5000, Math.floor(delay * 1.2)); // gradually increase, cap 5s
+    }
+
+    // if we exit loop because canceled or attempts exhausted
+    if(statusHandle) statusHandle.close();
+    return null;
+  }
 
   const fp = await computeFingerprint();  
   fpBox.textContent = fp;  
